@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+backend/venv/
+backend/.venv/
+
+# Build artifacts
+frontend/dist/
+*.pyc
+__pycache__/
+
+# Database & Environment
+*.db
+*.sqlite
+*.sqlite3
+.env
+.env.local
+.DS_Store
