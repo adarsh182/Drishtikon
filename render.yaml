@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: mca-policylens-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: SENTIMENT_MODEL
+        value: cardiffnlp/twitter-roberta-base-sentiment-latest

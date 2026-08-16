@@ -3,8 +3,9 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     database_url: str = "sqlite:///./policylens.db"
-    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173,https://drishtikon-indol.vercel.app"
     sentiment_model: str = "cardiffnlp/twitter-roberta-base-sentiment-latest"
+    use_ml_model: bool = False
 
     evolution_improved_drop_pct: float = 40.0
     evolution_emerging_min_growth_pct: float = 100.0

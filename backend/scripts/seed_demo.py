@@ -88,9 +88,9 @@ TEMPLATES = {
 }
 
 VERSION_COUNTS = {
-    "v1.0": {"Compliance Burden": 700, "Penalty Structure": 500, "Implementation Ambiguity": 30, "positive": 200, "neutral": 150},
-    "v2.0": {"Compliance Burden": 300, "Penalty Structure": 370, "Implementation Ambiguity": 280, "positive": 250, "neutral": 180},
-    "v3.0": {"Compliance Burden": 100, "Penalty Structure": 330, "Implementation Ambiguity": 410, "positive": 300, "neutral": 200},
+    "v1.0": {"Compliance Burden": 70, "Penalty Structure": 50, "Implementation Ambiguity": 3, "positive": 20, "neutral": 15},
+    "v2.0": {"Compliance Burden": 30, "Penalty Structure": 37, "Implementation Ambiguity": 28, "positive": 25, "neutral": 18},
+    "v3.0": {"Compliance Burden": 10, "Penalty Structure": 33, "Implementation Ambiguity": 41, "positive": 30, "neutral": 20},
 }
 
 
@@ -127,8 +127,14 @@ def seed():
     try:
         existing = db.query(Consultation).filter(Consultation.title == "Companies Act Amendment 2026").first()
         if existing:
-            print("Demo consultation already exists. Skipping seed.")
-            return existing.id
+            count = db.query(Comment).filter(Comment.consultation_id == existing.id).count()
+            if count > 0:
+                print("Demo consultation already seeded. Skipping seed.")
+                return existing.id
+            else:
+                print("Demo consultation orphaned without comments. Deleting and re-seeding.")
+                db.delete(existing)
+                db.commit()
 
         consultation = Consultation(
             title="Companies Act Amendment 2026",

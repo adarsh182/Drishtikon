@@ -19,12 +19,22 @@ from app.schemas import (
     VersionOut,
 )
 from app.services.analysis_pipeline import process_and_store_comments
-from app.services.dashboard_service import get_dashboard, _calc_priority
+from app.services.dashboard_service import get_dashboard
 from app.services.evidence_service import get_issue_evidence
 from app.services.evolution_service import get_comparison, get_issue_evolution
 from app.utils.csv_parser import parse_csv
 
 router = APIRouter()
+
+
+@router.get("/")
+def root():
+    return {
+        "service": "Drishtikon (दृष्टिकोण) · National Policy Analytics API",
+        "status": "running",
+        "health": "/health",
+        "docs": "/docs",
+    }
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -163,11 +173,35 @@ def get_comment(comment_id: int, db: Session = Depends(get_db)):
 
 @router.get("/issues/{consultation_id}", response_model=list[IssueOut])
 def list_issues(consultation_id: int, db: Session = Depends(get_db)):
+    from app.services.evolution_service import get_issue_evolution
+    from app.services.dashboard_service import calc_priority_full
+
+    evolution_data = get_issue_evolution(db, consultation_id)
+    evolution_map = {item["issue"]: item for item in evolution_data}
+    
+    versions = db.query(DraftVersion).filter(DraftVersion.consultation_id == consultation_id).order_by(DraftVersion.version_number).all()
+    version_labels = [v.version_number for v in versions]
+
+    total_stakeholders_in_consult = (
+        db.query(func.count(func.distinct(Comment.stakeholder_type)))
+        .filter(Comment.consultation_id == consultation_id, Comment.stakeholder_type.isnot(None))
+        .scalar() or 1
+    )
+
+    total_consult_recent = 0
+    if versions:
+        n = len(versions)
+        weights = [i + 1 for i in range(n)]
+        sum_w = sum(weights)
+        norm_w = [w / sum_w for w in weights]
+        total_consult_recent = sum((v.comment_count or 0) * w for v, w in zip(versions, norm_w))
+
     rows = (
         db.query(
             CommentAnalysis.issue,
             func.count(Comment.id),
             func.sum(case((CommentAnalysis.sentiment == "Negative", 1), else_=0)),
+            func.count(func.distinct(Comment.stakeholder_type))
         )
         .join(Comment, Comment.id == CommentAnalysis.comment_id)
         .filter(Comment.consultation_id == consultation_id, CommentAnalysis.issue.isnot(None))
@@ -176,15 +210,39 @@ def list_issues(consultation_id: int, db: Session = Depends(get_db)):
         .all()
     )
     result = []
-    for issue, count, neg in rows:
+    for issue, count, neg, sh_count in rows:
         neg_pct = round((neg / count) * 100, 1) if count else 0
-        priority = _calc_priority(count, neg_pct, db, consultation_id, issue)
-        result.append(IssueOut(issue=issue, count=count, negative_pct=neg_pct, priority=priority))
+        
+        evo = evolution_map.get(issue)
+        if evo:
+            v_counts = [evo["version_counts"].get(v, 0) for v in version_labels]
+        else:
+            v_counts = [count]
+
+        priority_res = calc_priority_full(
+            v_counts,
+            total_consult_recent,
+            neg_pct,
+            sh_count,
+            total_stakeholders_in_consult
+        )
+        result.append(
+            IssueOut(
+                issue=issue,
+                count=count,
+                negative_pct=neg_pct,
+                priority_score=priority_res["priority_score"],
+                priority_level=priority_res["priority_level"],
+                evidence_sufficiency=priority_res["evidence_sufficiency"]
+            )
+        )
     return result
 
 
 @router.get("/issues/{consultation_id}/{issue_name}", response_model=IssueDetailOut)
 def get_issue_detail(consultation_id: int, issue_name: str, db: Session = Depends(get_db)):
+    from app.services.dashboard_service import calc_priority_full
+
     base = (
         db.query(Comment)
         .join(CommentAnalysis, CommentAnalysis.comment_id == Comment.id)
@@ -213,6 +271,8 @@ def get_issue_detail(consultation_id: int, issue_name: str, db: Session = Depend
         .group_by(Comment.stakeholder_type)
         .all()
     )
+    issue_stakeholders = len(stakeholder_rows)
+
     version_rows = (
         db.query(DraftVersion.version_number, func.count(Comment.id))
         .join(Comment, Comment.version_id == DraftVersion.id)
@@ -221,6 +281,34 @@ def get_issue_detail(consultation_id: int, issue_name: str, db: Session = Depend
         .group_by(DraftVersion.version_number)
         .all()
     )
+    version_counts_map = {v: c for v, c in version_rows}
+
+    # Fetch context needed for priority calc
+    versions = db.query(DraftVersion).filter(DraftVersion.consultation_id == consultation_id).order_by(DraftVersion.version_number).all()
+    version_labels = [v.version_number for v in versions]
+    v_counts = [version_counts_map.get(v, 0) for v in version_labels]
+
+    total_stakeholders_in_consult = (
+        db.query(func.count(func.distinct(Comment.stakeholder_type)))
+        .filter(Comment.consultation_id == consultation_id, Comment.stakeholder_type.isnot(None))
+        .scalar() or 1
+    )
+
+    total_consult_recent = 0
+    if versions:
+        n = len(versions)
+        weights = [i + 1 for i in range(n)]
+        sum_w = sum(weights)
+        norm_w = [w / sum_w for w in weights]
+        total_consult_recent = sum((v.comment_count or 0) * w for v, w in zip(versions, norm_w))
+
+    priority_res = calc_priority_full(
+        v_counts,
+        total_consult_recent,
+        neg_pct,
+        issue_stakeholders,
+        total_stakeholders_in_consult
+    )
 
     return IssueDetailOut(
         issue=issue_name,
@@ -228,10 +316,16 @@ def get_issue_detail(consultation_id: int, issue_name: str, db: Session = Depend
         negative_pct=neg_pct,
         positive_pct=round(pos / total * 100, 1),
         neutral_pct=round(neu / total * 100, 1),
-        priority=_calc_priority(total, neg_pct, db, consultation_id, issue_name),
+        priority_score=priority_res["priority_score"],
+        priority_level=priority_res["priority_level"],
+        evidence_sufficiency=priority_res["evidence_sufficiency"],
+        priority_explanation=priority_res["priority_explanation"],
+        components=priority_res["components"],
+        lifecycle=priority_res["lifecycle"],
+        trajectory=priority_res["trajectory"],
         sections=[{"section": s, "count": c} for s, c in section_rows],
         stakeholders=[{"stakeholder": s, "count": c} for s, c in stakeholder_rows],
-        version_counts={v: c for v, c in version_rows},
+        version_counts=version_counts_map,
     )
 
 
@@ -286,12 +380,19 @@ async def upload_comments(
 
     content = await file.read()
     parsed = parse_csv(content)
-    if not parsed["valid"]:
+    
+    # Check if totally invalid (e.g. no comment column, bad format)
+    if not parsed.get("valid") and not parsed.get("rows"):
         return UploadResponse(
             success=False,
             message="; ".join(parsed["errors"][:5]) or "Validation failed",
             rows_total=parsed.get("rows_total", 0),
             rows_invalid=parsed.get("rows_invalid", 0),
+            rows_processed=0,
+            rows_filtered=parsed.get("rows_filtered", 0),
+            rows_failed=parsed.get("rows_failed", 0),
+            row_errors=parsed.get("row_errors", []),
+            warnings=parsed.get("warnings", []),
         )
 
     if consultation_id:
@@ -326,14 +427,36 @@ async def upload_comments(
             db.flush()
             version_map[vn] = dv.id
 
-    result = process_and_store_comments(db, consultation.id, version_map, parsed["rows"])
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        result = process_and_store_comments(db, consultation.id, version_map, parsed["rows"])
+    except Exception as e:
+        logger.error(f"Error processing comments for consultation {consultation.id}: {str(e)}")
+        # Note: If it fails catastrophically despite our try-except block, we return 500
+        raise HTTPException(
+            status_code=500, 
+            detail="A catastrophic error occurred while analyzing the comments. Please try again."
+        )
+
+    # Combine errors from parsing (filtered/failed) and processing (DB/NLP failed)
+    final_errors = parsed.get("row_errors", []) + result.get("row_errors", [])
+    total_processed = result["stored"]
+    total_failed = parsed.get("rows_failed", 0) + result.get("failed", 0)
+    total_filtered = parsed.get("rows_filtered", 0)
 
     return UploadResponse(
         success=True,
-        message=f"Successfully analyzed {result['stored']} comments",
+        message=f"Successfully analyzed {total_processed} comments.",
         rows_total=parsed["rows_total"],
-        rows_stored=result["stored"],
-        rows_invalid=parsed["rows_invalid"],
+        rows_stored=total_processed,
+        rows_invalid=total_failed, # legacy backwards compat
+        rows_processed=total_processed,
+        rows_filtered=total_filtered,
+        rows_failed=total_failed,
+        row_errors=final_errors,
+        warnings=parsed.get("warnings", []),
         sentiments=result["sentiments"],
         issues_detected=result["issues_detected"],
         consultation_id=consultation.id,

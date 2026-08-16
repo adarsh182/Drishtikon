@@ -61,11 +61,19 @@ class CommentListResponse(BaseModel):
     items: list[CommentOut]
 
 
+class PriorityComponents(BaseModel):
+    magnitude: float
+    negativity: float
+    stakeholder_breadth: float
+    evolution: float
+
 class IssueOut(BaseModel):
     issue: str
     count: int
     negative_pct: float
-    priority: str
+    priority_score: float
+    priority_level: str
+    evidence_sufficiency: str
 
 
 class IssueDetailOut(BaseModel):
@@ -74,7 +82,13 @@ class IssueDetailOut(BaseModel):
     negative_pct: float
     positive_pct: float
     neutral_pct: float
-    priority: str
+    priority_score: float
+    priority_level: str
+    evidence_sufficiency: str
+    priority_explanation: str
+    components: PriorityComponents
+    lifecycle: str
+    trajectory: str
     sections: list[dict[str, Any]]
     stakeholders: list[dict[str, Any]]
     version_counts: dict[str, int]
@@ -92,10 +106,14 @@ class UploadResponse(BaseModel):
     rows_total: int = 0
     rows_stored: int = 0
     rows_invalid: int = 0
+    rows_processed: int = 0
+    rows_filtered: int = 0
+    rows_failed: int = 0
+    row_errors: list[dict[str, Any]] = []
+    warnings: list[str] = []
     sentiments: dict[str, int] = {}
     issues_detected: list[str] = []
     consultation_id: int | None = None
-
 
 class DashboardResponse(BaseModel):
     consultation: dict[str, Any]

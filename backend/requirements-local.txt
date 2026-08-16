@@ -7,3 +7,5 @@ psycopg2-binary==2.9.10
 python-multipart==0.0.20
 pandas==2.2.3
 httpx==0.28.1
+transformers==4.47.1
+torch==2.5.1

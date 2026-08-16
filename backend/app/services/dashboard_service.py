@@ -1,3 +1,4 @@
+import math
 from typing import Any
 
 from sqlalchemy import case, func
@@ -120,11 +121,28 @@ def get_dashboard(db: Session, consultation_id: int) -> dict[str, Any]:
             "neutral_pct": round(data.get("neutral", 0) / t * 100, 1) if t else 0,
         })
 
+    from app.services.evolution_service import get_issue_evolution
+    evolution_data = get_issue_evolution(db, consultation_id)
+    evolution_map = {item["issue"]: item for item in evolution_data}
+    evolution_preview = evolution_data[:5]
+
+    total_stakeholders_in_consult = len(stakeholders)
+    
+    # Calculate recent weighted volume for the entire consultation to use as baseline
+    total_consult_recent = 0
+    if versions:
+        n = len(versions)
+        weights = [i + 1 for i in range(n)]
+        sum_w = sum(weights)
+        norm_w = [w / sum_w for w in weights]
+        total_consult_recent = sum(v.comment_count * w for v, w in zip(versions, norm_w))
+
     issue_rows = (
         db.query(
             CommentAnalysis.issue,
             func.count(Comment.id),
             func.sum(case((CommentAnalysis.sentiment == "Negative", 1), else_=0)),
+            func.count(func.distinct(Comment.stakeholder_type))
         )
         .join(Comment, Comment.id == CommentAnalysis.comment_id)
         .filter(Comment.consultation_id == consultation_id, CommentAnalysis.issue.isnot(None))
@@ -134,17 +152,31 @@ def get_dashboard(db: Session, consultation_id: int) -> dict[str, Any]:
         .all()
     )
     top_issues = []
-    for issue, count, neg in issue_rows:
+    version_labels = [v.version_number for v in versions]
+    for issue, count, neg, sh_count in issue_rows:
         neg_pct = round((neg / count) * 100, 1) if count else 0
-        priority = _calc_priority(count, neg_pct, db, consultation_id, issue)
+        
+        evo = evolution_map.get(issue)
+        if evo:
+            v_counts = [evo["version_counts"].get(v, 0) for v in version_labels]
+        else:
+            v_counts = [count]
+
+        priority_res = calc_priority_full(
+            v_counts,
+            total_consult_recent,
+            neg_pct,
+            sh_count,
+            total_stakeholders_in_consult
+        )
         top_issues.append({
             "issue": issue,
             "count": count,
             "negative_pct": neg_pct,
-            "priority": priority,
+            "priority_score": priority_res["priority_score"],
+            "priority_level": priority_res["priority_level"],
+            "evidence_sufficiency": priority_res["evidence_sufficiency"],
         })
-
-    evolution_preview = get_issue_evolution(db, consultation_id)[:5]
 
     return {
         "consultation": {
@@ -163,19 +195,127 @@ def get_dashboard(db: Session, consultation_id: int) -> dict[str, Any]:
     }
 
 
-def _calc_priority(count: int, neg_pct: float, db: Session, consultation_id: int, issue: str) -> str:
-    stakeholder_count = (
-        db.query(func.count(func.distinct(Comment.stakeholder_type)))
-        .join(CommentAnalysis, CommentAnalysis.comment_id == Comment.id)
-        .filter(Comment.consultation_id == consultation_id, CommentAnalysis.issue == issue)
-        .scalar()
-    ) or 1
-    freq_factor = min(count / 100, 3.0)
-    neg_factor = neg_pct / 100
-    diversity_factor = min(stakeholder_count / 3, 2.0)
-    score = freq_factor * neg_factor * diversity_factor
-    if score >= 1.5:
-        return "High"
-    if score >= 0.5:
-        return "Medium"
-    return "Low"
+def _calc_magnitude(version_counts: list[int], total_recent_volume: int) -> float:
+    n = len(version_counts)
+    if n == 0:
+        return 0.0
+    weights = [i + 1 for i in range(n)]
+    sum_w = sum(weights)
+    norm_w = [w / sum_w for w in weights]
+    recent_weighted_count = sum(c * w for c, w in zip(version_counts, norm_w))
+    issue_share = recent_weighted_count / max(total_recent_volume, 1)
+    return min(100.0, (issue_share / 0.10) ** 0.5 * 100.0)
+
+
+def _calc_evolution(version_counts: list[int]) -> tuple[float, str, str]:
+    n = len(version_counts)
+    if n <= 1:
+        return 50.0, "STABLE", "PERSISTENT"
+
+    w = [i + 1 for i in range(n)]
+    x = list(range(n))
+    sum_w = sum(w)
+    x_mean = sum(x[i] * w[i] for i in range(n)) / sum_w
+    y_mean = sum(version_counts[i] * w[i] for i in range(n)) / sum_w
+
+    num = sum(w[i] * (x[i] - x_mean) * (version_counts[i] - y_mean) for i in range(n))
+    den = sum(w[i] * (x[i] - x_mean) ** 2 for i in range(n))
+    slope = num / den if den != 0 else 0.0
+
+    trend_factor = math.tanh(slope / 100.0)
+    evolution_score = max(0.0, min(100.0, 50.0 + trend_factor * 50.0))
+
+    overall_diff = version_counts[-1] - version_counts[0]
+    abs_diffs = sum(abs(version_counts[i] - version_counts[i - 1]) for i in range(1, n))
+
+    consistency = abs(overall_diff) / max(abs_diffs, 1) if abs_diffs > 0 else 1.0
+
+    if consistency < 0.5 and abs_diffs > 0:
+        trajectory = "VOLATILE / RECOVERY" if version_counts[-1] > version_counts[-2] else "VOLATILE"
+    elif 45 <= evolution_score <= 55:
+        trajectory = "STABLE"
+    elif evolution_score > 55:
+        trajectory = "GROWING"
+    else:
+        trajectory = "DECLINING"
+
+    # Minimal lifecycle mapping purely for backwards compatibility if needed, though trajectory is better
+    if trajectory == "STABLE":
+        lifecycle = "PERSISTENT"
+    elif trajectory == "GROWING":
+        lifecycle = "EMERGING" if version_counts[0] < 50 else "WORSENED"
+    elif trajectory in ("VOLATILE", "VOLATILE / RECOVERY"):
+        lifecycle = "PERSISTENT"
+    else:
+        lifecycle = "IMPROVED"
+
+    return evolution_score, trajectory, lifecycle
+
+
+def calc_priority_full(
+    version_counts: list[int],
+    total_consultation_recent: int,
+    neg_pct: float,
+    issue_stakeholders: int,
+    total_stakeholders: int,
+) -> dict:
+    magnitude = _calc_magnitude(version_counts, total_consultation_recent)
+    negativity = neg_pct
+    diversity = (issue_stakeholders / max(total_stakeholders, 1)) * 100.0
+    
+    evolution, trajectory, lifecycle = _calc_evolution(version_counts)
+
+    priority_score = (
+        0.30 * magnitude
+        + 0.30 * negativity
+        + 0.20 * diversity
+        + 0.20 * evolution
+    )
+
+    if priority_score >= 70:
+        priority_level = "HIGH"
+    elif priority_score >= 40:
+        priority_level = "MEDIUM"
+    else:
+        priority_level = "LOW"
+        
+    total_issue_count = sum(version_counts)
+    if total_issue_count < 10:
+        evidence_sufficiency = "INSUFFICIENT"
+    elif total_issue_count < 30:
+        evidence_sufficiency = "LIMITED"
+    else:
+        evidence_sufficiency = "SUFFICIENT"
+        
+    # Generate explanation
+    reasons = []
+    if magnitude > 70: reasons.append("affects a substantial share of submissions")
+    elif magnitude > 40: reasons.append("affects a moderate share of submissions")
+    if negativity > 70: reasons.append("has predominantly negative feedback")
+    if diversity > 70: reasons.append("is raised across multiple stakeholder groups")
+    if evolution > 65: reasons.append("has increased across recent drafts")
+    elif evolution < 35: reasons.append("has decreased across recent drafts")
+    
+    explanation = f"{priority_level.capitalize()} priority because the concern "
+    if reasons:
+        if len(reasons) > 1:
+            explanation += ", ".join(reasons[:-1]) + f", and {reasons[-1]}."
+        else:
+            explanation += reasons[0] + "."
+    else:
+        explanation += "has a balanced mix of volume, sentiment, and trajectory."
+
+    return {
+        "priority_score": round(priority_score, 1),
+        "priority_level": priority_level,
+        "evidence_sufficiency": evidence_sufficiency,
+        "priority_explanation": explanation,
+        "lifecycle": lifecycle,
+        "trajectory": trajectory,
+        "components": {
+            "magnitude": round(magnitude, 1),
+            "negativity": round(negativity, 1),
+            "stakeholder_breadth": round(diversity, 1),
+            "evolution": round(evolution, 1),
+        }
+    }
