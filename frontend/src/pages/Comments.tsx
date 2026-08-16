@@ -6,7 +6,7 @@ import type { Comment, Version, Issue } from '../types';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
 import { sentimentColor } from '../utils/format';
-import { Search, ChevronLeft, ChevronRight, X, ArrowRight } from 'lucide-react';
+import { Search, ChevronLeft, ChevronRight, X, ArrowRight, ExternalLink } from 'lucide-react';
 
 const STAKEHOLDERS = [
   'Small Business',
@@ -18,6 +18,23 @@ const STAKEHOLDERS = [
   'Legal Professional',
   'Other',
 ];
+
+function highlightText(text: string, query: string) {
+  if (!query || !query.trim()) return text;
+  const terms = query.trim().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return text;
+  const regexPattern = `(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`;
+  const parts = text.split(new RegExp(regexPattern, 'gi'));
+  return parts.map((part, i) =>
+    terms.some((t) => t.toLowerCase() === part.toLowerCase()) ? (
+      <mark key={i} className="bg-amber-200/90 text-slate-950 font-semibold px-0.5 rounded-xs">
+        {part}
+      </mark>
+    ) : (
+      part
+    )
+  );
+}
 
 export default function Comments() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -38,21 +55,26 @@ export default function Comments() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Slide-over drawer state
+  const [selectedComment, setSelectedComment] = useState<Comment | null>(null);
+
   useEffect(() => {
     if (!selectedConsultationId) return;
     getVersions(selectedConsultationId).then(setVersionsList).catch(() => {});
     getIssues(selectedConsultationId).then(setIssuesList).catch(() => {});
   }, [selectedConsultationId]);
 
-  useEffect(() => {
-    if (!selectedConsultationId) {
-      if (!contextLoading) setLoading(false);
-      return;
-    }
+  const [loadingText, setLoadingText] = useState<string>('Connecting to PolicyLens analysis server...');
 
-    let active = true;
+  const fetchCommentsData = () => {
+    if (!selectedConsultationId) return;
     setLoading(true);
     setError(null);
+    setLoadingText('Connecting to PolicyLens analysis server...');
+
+    const slowLoadTimer = setTimeout(() => {
+      setLoadingText('The analysis server is starting. This may take a few moments.');
+    }, 2500);
 
     const queryParams: Record<string, string | number> = {
       consultation_id: selectedConsultationId,
@@ -68,23 +90,36 @@ export default function Comments() {
 
     getComments(queryParams)
       .then((res) => {
-        if (active) {
-          setComments(res.items);
-          setTotal(res.total);
-          setLoading(false);
-        }
+        clearTimeout(slowLoadTimer);
+        setComments(res.items);
+        setTotal(res.total);
+        setLoading(false);
       })
       .catch((err) => {
-        if (active) {
-          setError(err?.response?.data?.detail || 'Unable to load comments.');
-          setLoading(false);
-        }
+        clearTimeout(slowLoadTimer);
+        setError(err.friendlyMessage || err?.response?.data?.detail || 'Unable to load comments.');
+        setLoading(false);
       });
+  };
 
-    return () => {
-      active = false;
-    };
+  useEffect(() => {
+    if (!selectedConsultationId) {
+      if (!contextLoading) setLoading(false);
+      return;
+    }
+    fetchCommentsData();
   }, [selectedConsultationId, page, search, version, sentiment, stakeholder, issue, section, contextLoading]);
+
+  // Handle ESC key to close drawer
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSelectedComment(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,8 +139,8 @@ export default function Comments() {
 
   const hasActiveFilters = Boolean(search || version || sentiment || stakeholder || issue || section);
 
-  if (contextLoading) return <LoadingState />;
-  if (error) return <ErrorState message={error} />;
+  if (contextLoading || loading) return <LoadingState message={loadingText} />;
+  if (error) return <ErrorState message={error} onRetry={fetchCommentsData} />;
   if (!selectedConsultationId) {
     return (
       <div className="bg-white rounded border border-slate-200 p-8 text-center max-w-md mx-auto mt-12">
@@ -148,7 +183,7 @@ export default function Comments() {
             <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
             <input
               type="text"
-              placeholder="Search comment text or issues..."
+              placeholder="Search comment text or keyword with instant highlighting..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-8 pr-3 py-1.5 border border-slate-200 rounded text-xs focus:outline-none focus:ring-1 focus:ring-slate-400"
@@ -219,16 +254,19 @@ export default function Comments() {
             value={section}
             onChange={(e) => { setSection(e.target.value); setPage(1); }}
             className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400 text-xs"
-          >
-          </input>
+          />
 
-          {hasActiveFilters && (
+          {hasActiveFilters ? (
             <button
               onClick={handleClearFilters}
-              className="flex items-center justify-center gap-1 text-slate-600 hover:text-slate-900 border border-slate-200 rounded px-2 py-1 text-xs hover:bg-slate-50"
+              className="flex items-center justify-center gap-1 text-slate-600 hover:text-slate-900 border border-slate-200 rounded px-2 py-1 text-xs hover:bg-slate-50 font-medium"
             >
               <X size={12} /> Clear Filters
             </button>
+          ) : (
+            <div className="hidden lg:block text-slate-400 text-[11px] self-center text-right pr-1">
+              Showing 20/page
+            </div>
           )}
         </div>
       </div>
@@ -243,7 +281,7 @@ export default function Comments() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
+            <table className="w-full text-left text-xs min-w-[800px]">
               <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200">
                 <tr>
                   <th className="py-2.5 px-3 w-12 text-center">#</th>
@@ -253,47 +291,60 @@ export default function Comments() {
                   <th className="py-2.5 px-3 text-center">Version</th>
                   <th className="py-2.5 px-3">Stakeholder</th>
                   <th className="py-2.5 px-3">Section</th>
-                  <th className="py-2.5 px-3 text-right">Action</th>
+                  <th className="py-2.5 px-3 text-right">Inspect</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {comments.map((c) => (
-                  <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-2.5 px-3 text-center font-mono text-slate-400">
-                      {c.id}
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <p className="text-slate-800 line-clamp-2 leading-relaxed font-serif">
-                        "{c.text}"
-                      </p>
-                    </td>
-                    <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                      <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${sentimentColor(c.sentiment)}`}>
-                        {c.sentiment || 'Neutral'}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-800 font-medium whitespace-nowrap">
-                      {c.issue || 'General Feedback'}
-                    </td>
-                    <td className="py-2.5 px-3 text-center font-mono text-slate-700 whitespace-nowrap">
-                      {c.version || 'v1.0'}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
-                      {c.stakeholder_type || '—'}
-                    </td>
-                    <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
-                      {c.section || '—'}
-                    </td>
-                    <td className="py-2.5 px-3 text-right whitespace-nowrap">
-                      <Link
-                        to={`/comments/${c.id}`}
-                        className="text-blue-700 hover:text-blue-900 font-medium inline-flex items-center gap-0.5"
-                      >
-                        Inspect <ArrowRight size={10} />
-                      </Link>
-                    </td>
-                  </tr>
-                ))}
+                {comments.map((c) => {
+                  const isSelected = selectedComment?.id === c.id;
+                  return (
+                    <tr
+                      key={c.id}
+                      onClick={() => setSelectedComment(c)}
+                      className={`cursor-pointer transition-colors ${
+                        isSelected ? 'bg-slate-100/90 font-medium' : 'hover:bg-slate-50/80'
+                      }`}
+                    >
+                      <td className="py-2.5 px-3 text-center font-mono text-slate-400">
+                        {c.id}
+                      </td>
+                      <td className="py-2.5 px-3">
+                        <p className="text-slate-800 line-clamp-2 leading-relaxed font-serif">
+                          "{highlightText(c.text, search)}"
+                        </p>
+                      </td>
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap">
+                        <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${sentimentColor(c.sentiment)}`}>
+                          {c.sentiment || 'Neutral'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-800 font-medium whitespace-nowrap">
+                        {c.issue || 'General Feedback'}
+                      </td>
+                      <td className="py-2.5 px-3 text-center font-mono text-slate-700 whitespace-nowrap">
+                        {c.version || 'v1.0'}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
+                        {c.stakeholder_type || '—'}
+                      </td>
+                      <td className="py-2.5 px-3 text-slate-600 whitespace-nowrap">
+                        {c.section || '—'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedComment(c);
+                          }}
+                          className="text-blue-700 hover:text-blue-900 font-medium inline-flex items-center gap-0.5 hover:underline"
+                        >
+                          Inspect <ArrowRight size={10} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -327,6 +378,142 @@ export default function Comments() {
           </div>
         )}
       </div>
+
+      {/* Slide-over Drawer for Comment Inspection (P0.1) */}
+      {selectedComment && (
+        <>
+          {/* Backdrop */}
+          <div
+            onClick={() => setSelectedComment(null)}
+            className="fixed inset-0 bg-slate-900/30 backdrop-blur-xs z-40 transition-opacity"
+            aria-hidden="true"
+          />
+
+          {/* Drawer Panel */}
+          <aside
+            className="fixed inset-y-0 right-0 z-50 w-full sm:w-[480px] bg-white shadow-2xl border-l border-slate-200 flex flex-col overflow-hidden animate-in slide-in-from-right duration-200"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Comment Record #${selectedComment.id}`}
+          >
+            {/* Drawer Header */}
+            <div className="p-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-900">
+                  Comment Record #{selectedComment.id}
+                </span>
+                <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${sentimentColor(selectedComment.sentiment)}`}>
+                  {selectedComment.sentiment || 'Neutral'}
+                </span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Link
+                  to={`/comments/${selectedComment.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-1 text-slate-400 hover:text-slate-700 rounded transition-colors"
+                  title="Open direct permanent link in new tab"
+                >
+                  <ExternalLink size={14} />
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setSelectedComment(null)}
+                  className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 rounded transition-colors"
+                  title="Close (ESC)"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Drawer Content */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-5">
+              {/* Verbatim Comment Text Block */}
+              <div>
+                <label className="block text-[11px] font-medium text-slate-400 uppercase tracking-wider mb-1.5">
+                  Verbatim Stakeholder Submission
+                </label>
+                <blockquote className="text-sm text-slate-900 font-serif leading-relaxed pl-3 border-l-2 border-slate-300 bg-slate-50/50 p-3 rounded-r">
+                  "{highlightText(selectedComment.text, search)}"
+                </blockquote>
+              </div>
+
+              {/* Consultation Context & Analysis Attributes */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-1.5">
+                  Classification & Submission Context
+                </h3>
+
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between py-1 border-b border-slate-100">
+                    <span className="text-slate-500">Classified Sentiment</span>
+                    <span className="font-semibold text-slate-900">{selectedComment.sentiment || 'Neutral'}</span>
+                  </div>
+
+                  <div className="flex justify-between py-1 border-b border-slate-100">
+                    <span className="text-slate-500">Sentiment Confidence</span>
+                    <span className="font-mono text-slate-800">
+                      {selectedComment.confidence != null ? `${Math.round(selectedComment.confidence * 100)}%` : '—'}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between py-1 border-b border-slate-100 items-baseline">
+                    <span className="text-slate-500">Detected Concern Category</span>
+                    <span className="font-semibold text-slate-900 text-right">
+                      {selectedComment.issue || 'General Feedback'}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between py-1 border-b border-slate-100">
+                    <span className="text-slate-500">Policy Draft Version</span>
+                    <span className="font-mono font-medium text-slate-900">{selectedComment.version || 'v1.0'}</span>
+                  </div>
+
+                  <div className="flex justify-between py-1 border-b border-slate-100">
+                    <span className="text-slate-500">Stakeholder Group</span>
+                    <span className="font-medium text-slate-900">{selectedComment.stakeholder_type || 'Unspecified'}</span>
+                  </div>
+
+                  <div className="flex justify-between py-1 border-b border-slate-100">
+                    <span className="text-slate-500">Document Section</span>
+                    <span className="font-medium text-slate-900">{selectedComment.section || 'General'}</span>
+                  </div>
+
+                  <div className="flex justify-between py-1 border-b border-slate-100">
+                    <span className="text-slate-500">Subsection</span>
+                    <span className="text-slate-700">{selectedComment.subsection || '—'}</span>
+                  </div>
+                </div>
+
+                {/* Link to Issue Evidence */}
+                {selectedComment.issue && (
+                  <div className="pt-2">
+                    <Link
+                      to={`/issues?issue=${encodeURIComponent(selectedComment.issue)}`}
+                      className="inline-flex items-center gap-1.5 w-full justify-center py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded text-xs font-medium border border-slate-200 transition-colors"
+                    >
+                      Browse all evidence for "{selectedComment.issue}" <ArrowRight size={12} />
+                    </Link>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Drawer Footer */}
+            <div className="p-3 border-t border-slate-200 bg-slate-50/50 flex items-center justify-between text-xs text-slate-500">
+              <span className="text-[11px]">Press <kbd className="px-1 py-0.5 bg-slate-200 rounded text-[10px] font-mono">ESC</kbd> to close</span>
+              <button
+                type="button"
+                onClick={() => setSelectedComment(null)}
+                className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-white rounded font-medium text-xs transition-colors"
+              >
+                Done
+              </button>
+            </div>
+          </aside>
+        </>
+      )}
     </div>
   );
 }

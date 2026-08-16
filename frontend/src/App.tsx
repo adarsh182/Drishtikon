@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { Analytics } from '@vercel/analytics/react';
 import { ConsultationProvider } from './context/ConsultationContext';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
@@ -31,6 +32,8 @@ export default function App() {
           </Route>
         </Routes>
       </BrowserRouter>
+      <Analytics />
     </ConsultationProvider>
   );
 }
+

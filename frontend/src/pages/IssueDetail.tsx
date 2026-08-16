@@ -22,33 +22,36 @@ export default function IssueDetail() {
   const [evidenceLoading, setEvidenceLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const [loadingText, setLoadingText] = useState<string>('Connecting to PolicyLens analysis server...');
+
+  const fetchIssueDetail = () => {
     if (!consultationId || !issueName) {
       setLoading(false);
       return;
     }
-
-    let active = true;
     setLoading(true);
     setError(null);
+    setLoadingText('Connecting to PolicyLens analysis server...');
+
+    const slowLoadTimer = setTimeout(() => {
+      setLoadingText('The analysis server is starting. This may take a few moments.');
+    }, 2500);
 
     getIssueDetail(consultationId, issueName)
       .then((res) => {
-        if (active) {
-          setDetail(res);
-          setLoading(false);
-        }
+        clearTimeout(slowLoadTimer);
+        setDetail(res);
+        setLoading(false);
       })
       .catch((err) => {
-        if (active) {
-          setError(err?.response?.data?.detail || 'Unable to load issue details.');
-          setLoading(false);
-        }
+        clearTimeout(slowLoadTimer);
+        setError(err.friendlyMessage || err?.response?.data?.detail || 'Unable to load issue details.');
+        setLoading(false);
       });
+  };
 
-    return () => {
-      active = false;
-    };
+  useEffect(() => {
+    fetchIssueDetail();
   }, [consultationId, issueName]);
 
   useEffect(() => {
@@ -60,12 +63,14 @@ export default function IssueDetail() {
     getIssueEvidence(consultationId, issueName, page)
       .then((res) => {
         if (active) {
-          setEvidence(res);
+          setEvidence({ total: res.total, items: res.items });
           setEvidenceLoading(false);
         }
       })
       .catch(() => {
-        if (active) setEvidenceLoading(false);
+        if (active) {
+          setEvidenceLoading(false);
+        }
       });
 
     return () => {
@@ -73,8 +78,8 @@ export default function IssueDetail() {
     };
   }, [consultationId, issueName, page]);
 
-  if (loading) return <LoadingState />;
-  if (error) return <ErrorState message={error} />;
+  if (loading) return <LoadingState message={loadingText} />;
+  if (error) return <ErrorState message={error} onRetry={fetchIssueDetail} />;
   if (!consultationId || !detail) {
     return (
       <div className="bg-white rounded border border-slate-200 p-8 text-center max-w-md mx-auto mt-12">
@@ -111,8 +116,15 @@ export default function IssueDetail() {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-semibold tracking-tight text-slate-900">{detail.issue}</h2>
-            <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${priorityColor(detail.priority)}`}>
-              {detail.priority} Priority
+            <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${priorityColor(detail.priority_level)}`}>
+              {detail.priority_level} Priority
+            </span>
+            <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${
+              detail.evidence_sufficiency === 'INSUFFICIENT' ? 'bg-red-50 text-red-700' :
+              detail.evidence_sufficiency === 'LIMITED' ? 'bg-yellow-50 text-yellow-700' :
+              'bg-slate-100 text-slate-600'
+            }`}>
+              {detail.evidence_sufficiency} Evidence
             </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">

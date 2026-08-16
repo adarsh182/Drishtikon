@@ -14,33 +14,37 @@ export default function CommentDetail() {
   const [error, setError] = useState<string | null>(null);
   const [showTechnical, setShowTechnical] = useState<boolean>(false);
 
-  useEffect(() => {
+  const [loadingText, setLoadingText] = useState<string>('Connecting to PolicyLens analysis server...');
+
+  const fetchCommentDetail = () => {
     if (!id) return;
-    let active = true;
     setLoading(true);
     setError(null);
+    setLoadingText('Connecting to PolicyLens analysis server...');
+
+    const slowLoadTimer = setTimeout(() => {
+      setLoadingText('The analysis server is starting. This may take a few moments.');
+    }, 2500);
 
     getComment(Number(id))
       .then((res) => {
-        if (active) {
-          setComment(res);
-          setLoading(false);
-        }
+        clearTimeout(slowLoadTimer);
+        setComment(res);
+        setLoading(false);
       })
       .catch((err) => {
-        if (active) {
-          setError(err?.response?.data?.detail || 'Unable to load comment details.');
-          setLoading(false);
-        }
+        clearTimeout(slowLoadTimer);
+        setError(err.friendlyMessage || err?.response?.data?.detail || 'Unable to load comment details.');
+        setLoading(false);
       });
+  };
 
-    return () => {
-      active = false;
-    };
+  useEffect(() => {
+    fetchCommentDetail();
   }, [id]);
 
-  if (loading) return <LoadingState />;
-  if (error) return <ErrorState message={error} />;
+  if (loading) return <LoadingState message={loadingText} />;
+  if (error) return <ErrorState message={error} onRetry={fetchCommentDetail} />;
   if (!comment) {
     return (
       <div className="bg-white rounded border border-slate-200 p-8 text-center max-w-md mx-auto mt-12">

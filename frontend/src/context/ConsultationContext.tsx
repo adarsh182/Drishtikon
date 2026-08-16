@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { getConsultations } from '../services/api';
+import { getConsultations, healthCheck } from '../services/api';
 import type { Consultation } from '../types';
 
 interface ConsultationContextType {
@@ -37,18 +37,15 @@ export const ConsultationProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const list = await getConsultations();
       setConsultations(list);
 
-      if (selectId) {
+      if (selectId && list.some((c) => c.id === selectId)) {
         setSelectedConsultationId(selectId);
       } else if (list.length > 0) {
-        // If current selection is invalid or not set, select the first one
-        setSelectedConsultationIdState((prev) => {
-          if (prev && list.some((c) => c.id === prev)) {
-            return prev;
-          }
-          const defaultId = list[0].id;
-          localStorage.setItem(STORAGE_KEY, String(defaultId));
-          return defaultId;
-        });
+        const currentSaved = localStorage.getItem(STORAGE_KEY);
+        const validId = currentSaved && list.some((c) => c.id === Number(currentSaved))
+          ? Number(currentSaved)
+          : list[0].id;
+        setSelectedConsultationIdState(validId);
+        localStorage.setItem(STORAGE_KEY, String(validId));
       } else {
         setSelectedConsultationIdState(null);
         localStorage.removeItem(STORAGE_KEY);
@@ -60,9 +57,23 @@ export const ConsultationProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, [setSelectedConsultationId]);
 
+  // Initial load
   useEffect(() => {
     refreshConsultations();
   }, [refreshConsultations]);
+
+  // Background keep-alive ping: keeps the backend awake and active while browser is open
+  useEffect(() => {
+    // Immediate ping to wake backend from cold start
+    healthCheck().catch(() => {});
+
+    // Periodic ping every 4 minutes (Render sleeps after 15 mins)
+    const interval = setInterval(() => {
+      healthCheck().catch(() => {});
+    }, 4 * 60 * 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   const selectedConsultation = consultations.find((c) => c.id === selectedConsultationId) || null;
 

@@ -11,8 +11,45 @@ import type {
 } from '../types';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const DEFAULT_TIMEOUT = parseInt(import.meta.env.VITE_API_TIMEOUT_MS || '60000', 10);
+const UPLOAD_TIMEOUT = parseInt(import.meta.env.VITE_UPLOAD_TIMEOUT_MS || '180000', 10);
 
-const api = axios.create({ baseURL: API_URL });
+const api = axios.create({
+  baseURL: API_URL,
+  timeout: DEFAULT_TIMEOUT,
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    const config = error.config;
+    
+    // Initialize retry count
+    if (!config._retryCount) {
+      config._retryCount = 0;
+    }
+
+    const isTransientError = 
+      error.code === 'ECONNABORTED' || 
+      error.message === 'Network Error' ||
+      (error.response && [502, 503, 504].includes(error.response.status));
+
+    if (isTransientError && config._retryCount < 2) {
+      config._retryCount += 1;
+      const backoffDelay = 1000 * Math.pow(2, config._retryCount); // 2s, 4s...
+      await new Promise(resolve => setTimeout(resolve, backoffDelay));
+      return api(config);
+    }
+
+    // Rewrite transient/timeout errors for clear UX instead of generic Axios errors
+    if (isTransientError) {
+      error.isTransient = true;
+      error.friendlyMessage = 'Unable to connect to the analysis server. The server may be starting up or temporarily unavailable.';
+    }
+
+    return Promise.reject(error);
+  }
+);
 
 export async function healthCheck() {
   const { data } = await api.get('/health');
@@ -75,7 +112,11 @@ export async function uploadComments(file: File, consultationId?: number, replac
   const params: Record<string, string | number | boolean> = { replace };
   if (consultationId) params.consultation_id = consultationId;
   if (title) params.title = title;
-  const { data } = await api.post('/comments/upload', form, { params, headers: { 'Content-Type': 'multipart/form-data' } });
+  const { data } = await api.post('/comments/upload', form, {
+    params,
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: UPLOAD_TIMEOUT,
+  });
   return data;
 }
 

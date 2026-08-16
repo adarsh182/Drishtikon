@@ -18,14 +18,19 @@ export default function Consultations() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let active = true;
+  const [loadingText, setLoadingText] = useState<string>('Connecting to PolicyLens analysis server...');
+
+  const fetchConsultationsData = () => {
     setLoading(true);
     setError(null);
+    setLoadingText('Connecting to PolicyLens analysis server...');
+
+    const slowLoadTimer = setTimeout(() => {
+      setLoadingText('The analysis server is starting. This may take a few moments.');
+    }, 2500);
 
     getConsultations()
       .then(async (list) => {
-        if (!active) return;
         const rowList: ConsultationRowData[] = [];
         for (const c of list) {
           try {
@@ -35,25 +40,23 @@ export default function Consultations() {
             rowList.push({ consultation: c });
           }
         }
-        if (active) {
-          setRows(rowList);
-          setLoading(false);
-        }
+        clearTimeout(slowLoadTimer);
+        setRows(rowList);
+        setLoading(false);
       })
       .catch((err) => {
-        if (active) {
-          setError(err?.response?.data?.detail || 'Unable to load consultations.');
-          setLoading(false);
-        }
+        clearTimeout(slowLoadTimer);
+        setError(err.friendlyMessage || err?.response?.data?.detail || 'Unable to load consultations.');
+        setLoading(false);
       });
+  };
 
-    return () => {
-      active = false;
-    };
+  useEffect(() => {
+    fetchConsultationsData();
   }, []);
 
-  if (contextLoading || loading) return <LoadingState />;
-  if (error) return <ErrorState message={error} />;
+  if (contextLoading || loading) return <LoadingState message={loadingText} />;
+  if (error) return <ErrorState message={error} onRetry={fetchConsultationsData} />;
 
   return (
     <div className="space-y-5 max-w-7xl mx-auto">
@@ -77,7 +80,7 @@ export default function Consultations() {
       {/* Consultations Management Table */}
       <div className="bg-white border border-slate-200 rounded overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
+          <table className="w-full text-left text-xs min-w-[800px]">
             <thead className="bg-slate-50 text-slate-600 font-semibold uppercase tracking-wider border-b border-slate-200">
               <tr>
                 <th className="py-2.5 px-4 w-1/3">Consultation Title</th>

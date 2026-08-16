@@ -32,16 +32,29 @@ export interface Comment {
   issue_confidence?: number;
 }
 
+export interface PriorityComponents {
+  magnitude: number;
+  negativity: number;
+  stakeholder_breadth: number;
+  evolution: number;
+}
+
 export interface Issue {
   issue: string;
   count: number;
   negative_pct: number;
-  priority: string;
+  priority_score: number;
+  priority_level: string;
+  evidence_sufficiency: string;
 }
 
 export interface IssueDetail extends Issue {
   positive_pct: number;
   neutral_pct: number;
+  priority_explanation: string;
+  components: PriorityComponents;
+  lifecycle: string;
+  trajectory: string;
   sections: { section: string; count: number }[];
   stakeholders: { stakeholder: string; count: number }[];
   version_counts: Record<string, number>;
@@ -92,6 +105,11 @@ export interface UploadResult {
   rows_total: number;
   rows_stored: number;
   rows_invalid: number;
+  rows_processed?: number;
+  rows_filtered?: number;
+  rows_failed?: number;
+  row_errors?: Array<{ row_number: number; status: string; reason: string }>;
+  warnings?: string[];
   sentiments: Record<string, number>;
   issues_detected: string[];
   consultation_id?: number;

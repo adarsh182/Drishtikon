@@ -17,21 +17,34 @@ export default function ConsultationDetail() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
-  useEffect(() => {
+  const [loadingText, setLoadingText] = useState<string>('Connecting to PolicyLens analysis server...');
+
+  const fetchConsultationDetail = () => {
     if (!id) return;
     setLoading(true);
     setError(null);
+    setLoadingText('Connecting to PolicyLens analysis server...');
+
+    const slowLoadTimer = setTimeout(() => {
+      setLoadingText('The analysis server is starting. This may take a few moments.');
+    }, 2500);
 
     Promise.all([getConsultation(Number(id)), getDashboard(Number(id))])
       .then(([c, d]) => {
+        clearTimeout(slowLoadTimer);
         setConsultation(c);
         setDashboard(d);
         setLoading(false);
       })
       .catch((err) => {
-        setError(err?.response?.data?.detail || 'Unable to load consultation details.');
+        clearTimeout(slowLoadTimer);
+        setError(err.friendlyMessage || err?.response?.data?.detail || 'Unable to load consultation details.');
         setLoading(false);
       });
+  };
+
+  useEffect(() => {
+    fetchConsultationDetail();
   }, [id]);
 
   const handleSetActiveAndGoToDashboard = () => {
@@ -48,8 +61,8 @@ export default function ConsultationDetail() {
     }
   };
 
-  if (loading) return <LoadingState />;
-  if (error) return <ErrorState message={error} />;
+  if (loading) return <LoadingState message={loadingText} />;
+  if (error) return <ErrorState message={error} onRetry={fetchConsultationDetail} />;
   if (!consultation || !dashboard) return null;
 
   return (
@@ -150,8 +163,8 @@ export default function ConsultationDetail() {
                 <p className="text-[11px] text-slate-500">{issue.count} comments</p>
               </div>
               <div className="flex items-center gap-2">
-                <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${priorityColor(issue.priority)}`}>
-                  {issue.priority} · {issue.negative_pct}% negative
+                <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${priorityColor(issue.priority_level)}`}>
+                  {issue.priority_level} · {issue.negative_pct}% negative
                 </span>
                 <ArrowRight size={12} className="text-slate-400 group-hover:text-slate-700" />
               </div>

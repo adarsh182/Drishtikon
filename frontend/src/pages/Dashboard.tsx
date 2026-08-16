@@ -12,6 +12,7 @@ import {
   Legend,
   LineChart,
   Line,
+  CartesianGrid,
 } from 'recharts';
 import { Link } from 'react-router-dom';
 import { useConsultation } from '../context/ConsultationContext';
@@ -19,8 +20,8 @@ import { getDashboard } from '../services/api';
 import type { DashboardData } from '../types';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
-import { priorityColor, statusColor } from '../utils/format';
-import { ArrowRight } from 'lucide-react';
+import { priorityColor } from '../utils/format';
+import { ArrowRight, AlertTriangle, GitCompare, MessageSquare } from 'lucide-react';
 
 const COLORS = {
   Positive: '#059669', // subtle emerald
@@ -33,38 +34,41 @@ export default function Dashboard() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadingText, setLoadingText] = useState<string>('Connecting to PolicyLens analysis server...');
+
+  const fetchDashboard = () => {
+    if (!selectedConsultationId) return;
+    setLoading(true);
+    setError(null);
+    setLoadingText('Connecting to PolicyLens analysis server...');
+
+    const slowLoadTimer = setTimeout(() => {
+      setLoadingText('The analysis server is starting. This may take a few moments.');
+    }, 2500);
+
+    getDashboard(selectedConsultationId)
+      .then((dash) => {
+        clearTimeout(slowLoadTimer);
+        setData(dash);
+        setLoading(false);
+      })
+      .catch((err) => {
+        clearTimeout(slowLoadTimer);
+        setError(err.friendlyMessage || err?.response?.data?.detail || 'Unable to load dashboard data.');
+        setLoading(false);
+      });
+  };
 
   useEffect(() => {
     if (!selectedConsultationId) {
       if (!contextLoading) setLoading(false);
       return;
     }
-
-    let active = true;
-    setLoading(true);
-    setError(null);
-
-    getDashboard(selectedConsultationId)
-      .then((dash) => {
-        if (active) {
-          setData(dash);
-          setLoading(false);
-        }
-      })
-      .catch((err) => {
-        if (active) {
-          setError(err?.response?.data?.detail || 'Unable to load dashboard data.');
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      active = false;
-    };
+    fetchDashboard();
   }, [selectedConsultationId, contextLoading]);
 
-  if (contextLoading || loading) return <LoadingState />;
-  if (error) return <ErrorState message={error} />;
+  if (contextLoading || loading) return <LoadingState message={loadingText} />;
+  if (error) return <ErrorState message={error} onRetry={fetchDashboard} />;
   if (!selectedConsultationId || !data) {
     return (
       <div className="bg-white rounded border border-slate-200 p-8 text-center max-w-md mx-auto mt-12">
@@ -110,23 +114,23 @@ export default function Dashboard() {
         <div className="bg-white border border-slate-200 rounded p-3.5">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Total Feedback</span>
           <p className="text-xl font-semibold text-slate-900 mt-1">{data.kpis.total.toLocaleString()}</p>
-          <span className="text-[11px] text-slate-400">Comments</span>
+          <span className="text-[11px] text-slate-400">Submissions</span>
         </div>
 
         <div className="bg-white border border-slate-200 rounded p-3.5">
-          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Positive</span>
+          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Positive Support</span>
           <p className="text-xl font-semibold text-emerald-700 mt-1">{data.kpis.positive_pct}%</p>
           <span className="text-[11px] text-slate-400">{data.kpis.positive.toLocaleString()} comments</span>
         </div>
 
         <div className="bg-white border border-slate-200 rounded p-3.5">
-          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Neutral</span>
+          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Neutral Inquiries</span>
           <p className="text-xl font-semibold text-slate-700 mt-1">{data.kpis.neutral_pct}%</p>
           <span className="text-[11px] text-slate-400">{data.kpis.neutral.toLocaleString()} comments</span>
         </div>
 
         <div className="bg-white border border-slate-200 rounded p-3.5">
-          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Negative</span>
+          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Negative Concern</span>
           <p className="text-xl font-semibold text-rose-700 mt-1">{data.kpis.negative_pct}%</p>
           <span className="text-[11px] text-slate-400">{data.kpis.negative.toLocaleString()} comments</span>
         </div>
@@ -134,21 +138,21 @@ export default function Dashboard() {
         <div className="bg-white border border-slate-200 rounded p-3.5 col-span-2 sm:col-span-1">
           <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wide">Drafts Evaluated</span>
           <p className="text-xl font-semibold text-slate-900 mt-1">{data.versions.length}</p>
-          <span className="text-[11px] text-slate-400">
+          <span className="text-[11px] text-slate-400 font-mono">
             {data.versions.map((v) => v.version_number).join(' → ')}
           </span>
         </div>
       </div>
 
-      {/* Row 1: Sentiment Overview & Evolution */}
+      {/* Row 1: Sentiment Overview & Sentiment Trajectory */}
       <div className="grid lg:grid-cols-2 gap-5">
-        {/* Sentiment Distribution */}
+        {/* Sentiment Distribution Donut */}
         <div className="bg-white border border-slate-200 rounded p-4">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-3 border-b border-slate-100 pb-2 gap-2">
             <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
               Sentiment Distribution
             </h3>
-            <div className="flex items-center gap-3 text-xs">
+            <div className="flex flex-wrap items-center gap-3 text-xs">
               <span className="flex items-center gap-1 text-emerald-700 font-medium">
                 <span className="w-2 h-2 rounded-full bg-emerald-600" /> Positive {data.kpis.positive_pct}%
               </span>
@@ -169,8 +173,8 @@ export default function Dashboard() {
                   nameKey="name"
                   cx="50%"
                   cy="50%"
-                  outerRadius={75}
-                  innerRadius={45}
+                  outerRadius={78}
+                  innerRadius={48}
                   stroke="#fff"
                   strokeWidth={2}
                 >
@@ -184,23 +188,24 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Sentiment Evolution across Versions */}
+        {/* Sentiment Trajectory Across Drafts */}
         <div className="bg-white border border-slate-200 rounded p-4">
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
             <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
               Sentiment Trajectory Across Drafts
             </h3>
-            <Link to="/evolution" className="text-xs font-medium text-slate-600 hover:text-slate-900 inline-flex items-center gap-1">
+            <Link to="/evolution" className="text-xs font-medium text-blue-700 hover:text-blue-900 inline-flex items-center gap-0.5">
               Policy Evolution →
             </Link>
           </div>
-          <div className="h-56 w-full">
+          <div className="h-64 sm:h-56 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data.sentiment_by_version} margin={{ top: 10, right: 15, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="version" tick={{ fontSize: 11, fill: '#64748b' }} />
                 <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 11, fill: '#64748b' }} />
                 <Tooltip formatter={(val: any) => [`${val}%`, '']} />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: 11 }} />
+                <Legend iconType="circle" wrapperStyle={{ fontSize: 11, paddingBottom: 6 }} />
                 <Line
                   type="monotone"
                   dataKey="positive_pct"
@@ -232,108 +237,90 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Row 2: Top Policy Concerns & Evolution Preview */}
+      {/* Row 2: Key Policy Concerns & Feedback Distribution by Section */}
       <div className="grid lg:grid-cols-2 gap-5">
-        {/* Top Policy Concerns */}
-        <div className="bg-white border border-slate-200 rounded p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
-              Top Policy Concerns
-            </h3>
-            <Link to="/issues" className="text-xs font-medium text-slate-600 hover:text-slate-900">
-              All Issues ({data.top_issues.length}) →
-            </Link>
-          </div>
-
-          <div className="divide-y divide-slate-100">
-            {data.top_issues.length === 0 ? (
-              <p className="text-xs text-slate-400 py-6 text-center">No specific issues detected</p>
-            ) : (
-              data.top_issues.slice(0, 5).map((issue) => (
-                <Link
-                  key={issue.issue}
-                  to={`/issues/${data.consultation.id}/${encodeURIComponent(issue.issue)}`}
-                  className="flex items-center justify-between py-2.5 px-2 hover:bg-slate-50 rounded transition-colors group"
-                >
-                  <div className="pr-4">
-                    <span className="text-xs font-medium text-slate-900 group-hover:text-blue-700">
-                      {issue.issue}
-                    </span>
-                    <span className="text-[11px] text-slate-500 block">
-                      {issue.count} comments · {issue.negative_pct}% negative concern
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <span className={`text-[11px] px-2 py-0.5 rounded ${priorityColor(issue.priority)}`}>
-                      {issue.priority}
-                    </span>
-                    <ArrowRight size={13} className="text-slate-400 group-hover:text-slate-700" />
-                  </div>
-                </Link>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Evolution Summary */}
+        {/* Key Policy Concerns Requiring Review */}
         <div className="bg-white border border-slate-200 rounded p-4 flex flex-col justify-between">
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
-                Concern Progression Between Drafts
-              </h3>
-              <Link to="/evolution" className="text-xs font-medium text-slate-600 hover:text-slate-900">
-                View Matrix →
+            <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-1.5">
+                <AlertTriangle size={14} className="text-rose-600" />
+                <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
+                  Key Policy Concerns Requiring Review
+                </h3>
+              </div>
+              <Link to="/issues" className="text-xs font-medium text-blue-700 hover:text-blue-900">
+                All Issues ({data.top_issues.length}) →
               </Link>
             </div>
 
             <div className="divide-y divide-slate-100">
-              {data.evolution_preview.length === 0 ? (
-                <p className="text-xs text-slate-400 py-6 text-center">No evolution data available</p>
+              {data.top_issues.length === 0 ? (
+                <p className="text-xs text-slate-400 py-6 text-center">No specific issues detected</p>
               ) : (
-                data.evolution_preview.map((item) => (
-                  <div
-                    key={item.issue}
-                    className="flex items-center justify-between py-2.5 px-2"
+                data.top_issues.slice(0, 5).map((issue) => (
+                  <Link
+                    key={issue.issue}
+                    to={`/issues?issue=${encodeURIComponent(issue.issue)}`}
+                    className="flex flex-col sm:flex-row sm:items-center justify-between py-2.5 px-2 hover:bg-slate-50 rounded transition-colors group gap-2"
                   >
-                    <div>
-                      <span className="text-xs font-medium text-slate-900">{item.issue}</span>
-                      <span className="text-[11px] text-slate-500 block">
-                        {Object.entries(item.version_counts)
-                          .map(([v, c]) => `${v}: ${c}`)
-                          .join(' · ')}
+                    <div className="pr-4">
+                      <span className="text-xs font-semibold text-slate-900 group-hover:text-blue-700 block mb-0.5">
+                        {issue.issue}
+                      </span>
+                      <span className="text-[11px] text-slate-500 flex flex-wrap items-center gap-2">
+                        <span>{issue.count} comments</span>
+                        <span>·</span>
+                        <strong className="text-rose-700 font-medium">{issue.negative_pct}% negative</strong>
+                        <span>·</span>
+                        <span className={`px-1.5 py-0.5 rounded border ${
+                          issue.evidence_sufficiency === 'INSUFFICIENT' ? 'bg-red-50 text-red-700 border-red-200' :
+                          issue.evidence_sufficiency === 'LIMITED' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                          'bg-slate-50 text-slate-600 border-slate-200'
+                        }`}>
+                          {issue.evidence_sufficiency} Evidence
+                        </span>
                       </span>
                     </div>
-                    <span className={`text-[11px] px-2 py-0.5 rounded ${statusColor(item.status)}`}>
-                      {item.status}
-                    </span>
-                  </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex flex-col items-end">
+                        <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${priorityColor(issue.priority_level)}`}>
+                          {issue.priority_level} Priority
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-medium mt-0.5 pr-0.5">
+                          {Math.round(issue.priority_score)}/100
+                        </span>
+                      </div>
+                      <ArrowRight size={13} className="text-slate-400 group-hover:text-slate-700 hidden sm:block" />
+                    </div>
+                  </Link>
                 ))
               )}
             </div>
           </div>
 
-          <div className="pt-3 mt-3 border-t border-slate-100 text-right">
+          <div className="pt-3 mt-2 border-t border-slate-100 text-right">
             <Link
-              to="/evolution"
+              to="/issues"
               className="text-xs font-medium text-slate-700 hover:text-slate-900 inline-flex items-center gap-1"
             >
-              Full Policy Evolution Breakdown <ArrowRight size={13} />
+              Open Issues & Verbatim Evidence Master-Detail <ArrowRight size={12} />
             </Link>
           </div>
         </div>
-      </div>
 
-      {/* Row 3: Section and Stakeholder Breakdown */}
-      <div className="grid lg:grid-cols-2 gap-5">
-        {/* Feedback by Section */}
+        {/* Feedback by Policy Section */}
         <div className="bg-white border border-slate-200 rounded p-4">
-          <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider mb-3">
-            Feedback Distribution by Section
-          </h3>
-          <div className="h-56 w-full">
+          <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+            <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
+              Feedback Distribution by Section
+            </h3>
+            <span className="text-[11px] text-slate-400">Stacked Sentiment Breakdown</span>
+          </div>
+          <div className="h-64 sm:h-56 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data.sections.slice(0, 6)} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="section" angle={-15} textAnchor="end" tick={{ fontSize: 10, fill: '#64748b' }} />
                 <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 10, fill: '#64748b' }} />
                 <Tooltip formatter={(val: any) => [`${val}%`, '']} />
@@ -345,21 +332,102 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
         </div>
+      </div>
 
-        {/* Negative Sentiment by Stakeholder */}
+      {/* Row 3: Stakeholder Dissent & Quick Consultation Actions */}
+      <div className="grid lg:grid-cols-2 gap-5">
+        {/* Negative Sentiment by Stakeholder Group */}
         <div className="bg-white border border-slate-200 rounded p-4">
-          <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider mb-3">
-            Negative Concern by Stakeholder Group
-          </h3>
-          <div className="h-56 w-full">
+          <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+            <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
+              Negative Concern by Stakeholder Group
+            </h3>
+            <span className="text-[11px] text-slate-400">Highest Opposition Segments</span>
+          </div>
+          <div className="h-64 sm:h-52 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data.stakeholders.slice(0, 6)} margin={{ top: 10, right: 10, left: -20, bottom: 25 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                 <XAxis dataKey="stakeholder" angle={-15} textAnchor="end" tick={{ fontSize: 10, fill: '#64748b' }} />
                 <YAxis domain={[0, 100]} unit="%" tick={{ fontSize: 10, fill: '#64748b' }} />
                 <Tooltip formatter={(val: any) => [`${val}%`, 'Negative Concern']} />
                 <Bar dataKey="negative_pct" fill={COLORS.Negative} name="Negative %" radius={[2, 2, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Quick Consultation Actions & Scope */}
+        <div className="bg-white border border-slate-200 rounded p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+              <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
+                Deliberation & Review Tools
+              </h3>
+              <span className="text-[11px] text-slate-400 font-mono">Dataset #{data.consultation.id}</span>
+            </div>
+
+            <div className="space-y-2.5">
+              <Link
+                to="/evolution"
+                className="flex items-center justify-between p-2.5 rounded border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors group"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded bg-blue-50 text-blue-700 flex items-center justify-center flex-shrink-0">
+                    <GitCompare size={15} />
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold text-slate-900 group-hover:text-blue-700">
+                      Policy Evolution Matrix
+                    </span>
+                    <p className="text-[11px] text-slate-500">
+                      Track whether draft revisions resolved stakeholder objections across versions
+                    </p>
+                  </div>
+                </div>
+                <ArrowRight size={13} className="text-slate-400 group-hover:text-slate-700" />
+              </Link>
+
+              <Link
+                to="/issues"
+                className="flex items-center justify-between p-2.5 rounded border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors group"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded bg-rose-50 text-rose-700 flex items-center justify-center flex-shrink-0">
+                    <AlertTriangle size={15} />
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold text-slate-900 group-hover:text-blue-700">
+                      Issues & Evidence Master-Detail
+                    </span>
+                    <p className="text-[11px] text-slate-500">
+                      Inspect verbatim submissions categorised by topic, priority, and section
+                    </p>
+                  </div>
+                </div>
+                <ArrowRight size={13} className="text-slate-400 group-hover:text-slate-700" />
+              </Link>
+
+              <Link
+                to="/comments"
+                className="flex items-center justify-between p-2.5 rounded border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors group"
+              >
+                <div className="flex items-center gap-2.5">
+                  <div className="w-7 h-7 rounded bg-slate-100 text-slate-700 flex items-center justify-center flex-shrink-0">
+                    <MessageSquare size={15} />
+                  </div>
+                  <div>
+                    <span className="text-xs font-semibold text-slate-900 group-hover:text-blue-700">
+                      Search & Filter Raw Submissions
+                    </span>
+                    <p className="text-[11px] text-slate-500">
+                      Full-text search with highlighting and slide-over comment inspection
+                    </p>
+                  </div>
+                </div>
+                <ArrowRight size={13} className="text-slate-400 group-hover:text-slate-700" />
+              </Link>
+            </div>
           </div>
         </div>
       </div>
