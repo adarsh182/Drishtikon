@@ -239,15 +239,11 @@ def _calc_evolution(version_counts: list[int]) -> tuple[float, str, str]:
     else:
         trajectory = "DECLINING"
 
-    # Minimal lifecycle mapping purely for backwards compatibility if needed, though trajectory is better
-    if trajectory == "STABLE":
-        lifecycle = "PERSISTENT"
-    elif trajectory == "GROWING":
-        lifecycle = "EMERGING" if version_counts[0] < 50 else "WORSENED"
-    elif trajectory in ("VOLATILE", "VOLATILE / RECOVERY"):
-        lifecycle = "PERSISTENT"
-    else:
-        lifecycle = "IMPROVED"
+    from app.services.evolution_service import classify_lifecycle
+    c = list(version_counts)
+    while len(c) < 3:
+        c.append(0)
+    lifecycle = classify_lifecycle(c[0], c[1], c[2])
 
     return evolution_score, trajectory, lifecycle
 
