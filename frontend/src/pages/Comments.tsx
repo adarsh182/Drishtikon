@@ -139,7 +139,7 @@ export default function Comments() {
 
   const hasActiveFilters = Boolean(search || version || sentiment || stakeholder || issue || section);
 
-  if (contextLoading || loading) return <LoadingState message={loadingText} />;
+  if (contextLoading) return <LoadingState message={loadingText} />;
   if (error) return <ErrorState message={error} onRetry={fetchCommentsData} />;
   if (!selectedConsultationId) {
     return (
