@@ -88,34 +88,71 @@ flowchart TD
 
 ## 4. Manual / Step-by-Step Setup
 
-If you prefer starting backend and frontend separately:
+If you prefer starting backend and frontend manually in separate terminal windows:
 
-### Backend Setup (FastAPI + PyTorch + SQLite):
-```bash
+### 🪟 Windows (Command Prompt / PowerShell):
+
+**Terminal 1 — Backend (FastAPI + PyTorch + SQLite):**
+```cmd
 cd backend
 
-# Create & activate virtual environment
-python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+:: 1. Create & activate Python virtual environment
+python -m venv venv
+venv\Scripts\activate
 
-# Install dependencies
+:: 2. Install backend dependencies
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 
-# Initialize database, download/cache models, and seed demo dataset
-python scripts/setup_local.py
+:: 3. Initialize SQLite DB, check/cache AI models, and seed demo dataset
+python scripts\setup_local.py
 
-# Launch FastAPI development server
+:: 4. Launch FastAPI server
 uvicorn app.main:app --port 8000
 ```
 
-### Frontend Setup (React + Vite + Tailwind):
+**Terminal 2 — Frontend (React + Vite):**
+```cmd
+cd frontend
+
+:: 1. Install Node dependencies
+npm install
+
+:: 2. Start Vite frontend server
+npm run dev
+```
+
+---
+
+### 🍎 macOS / 🐧 Linux (Bash / Zsh):
+
+**Terminal 1 — Backend (FastAPI + PyTorch + SQLite):**
+```bash
+cd backend
+
+# 1. Create & activate Python virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# 2. Install backend dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+
+# 3. Initialize SQLite DB, check/cache AI models, and seed demo dataset
+python scripts/setup_local.py
+
+# 4. Launch FastAPI server
+uvicorn app.main:app --port 8000
+```
+
+**Terminal 2 — Frontend (React + Vite):**
 ```bash
 cd frontend
 
-# Install Node modules
+# 1. Install Node dependencies
 npm install
 
-# Start Vite dev server
+# 2. Start Vite frontend server
 npm run dev
 ```
 
