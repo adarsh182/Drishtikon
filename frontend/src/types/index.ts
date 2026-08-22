@@ -30,7 +30,54 @@ export interface Comment {
   model_name?: string;
   issue?: string;
   issue_confidence?: number;
+  detected_language?: string;
+  language_confidence?: number;
+  aspect?: string;
+  aspect_confidence?: number;
+  argument_evidence?: string;
 }
+
+export interface SimilarComment {
+  comment_id: number;
+  similarity_score: number;
+  text: string;
+  version?: string;
+  sentiment?: string;
+  issue?: string;
+  detected_language?: string;
+  stakeholder_type?: string;
+}
+
+export interface DuplicateGroup {
+  group_id: number;
+  duplicate_type: 'exact' | 'near';
+  similarity_score: number;
+  representative_text: string;
+  comment_count: number;
+  comments: SimilarComment[];
+}
+
+export interface LanguageStat {
+  language: string;
+  code: string;
+  count: number;
+  percentage: number;
+  positive_pct: number;
+  negative_pct: number;
+  neutral_pct: number;
+}
+
+export interface SystemInfo {
+  sentiment_model: string;
+  embedding_model: string;
+  language_detection: string;
+  inference_mode: string;
+  languages_tested: string[];
+  similarity_threshold: number;
+  duplicate_threshold: number;
+  issue_similarity_threshold: number;
+}
+
 
 export interface PriorityComponents {
   magnitude: number;

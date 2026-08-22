@@ -19,6 +19,35 @@ const STAKEHOLDERS = [
   'Other',
 ];
 
+const LANG_OPTIONS = [
+  { code: 'en', name: 'English' },
+  { code: 'hi', name: 'Hindi (हिन्दी)' },
+  { code: 'ta', name: 'Tamil (தமிழ்)' },
+  { code: 'mr', name: 'Marathi (मराठी)' },
+  { code: 'gu', name: 'Gujarati (ગુજરાતી)' },
+  { code: 'bn', name: 'Bengali (বাংলা)' },
+  { code: 'te', name: 'Telugu (తెలుగు)' },
+  { code: 'kn', name: 'Kannada (ಕನ್ನಡ)' },
+  { code: 'ml', name: 'Malayalam (മലയാളം)' },
+  { code: 'pa', name: 'Punjabi (ਪੰਜਾਬੀ)' },
+  { code: 'mixed', name: 'Hinglish / Mixed' },
+];
+
+const LANG_NAMES: Record<string, string> = {
+  en: 'English (en)',
+  hi: 'Hindi (हिन्दी)',
+  ta: 'Tamil (தமிழ்)',
+  mr: 'Marathi (मराठी)',
+  gu: 'Gujarati (ગુજરાતી)',
+  bn: 'Bengali (বাংলা)',
+  te: 'Telugu (తెలుగు)',
+  kn: 'Kannada (ಕನ್ನಡ)',
+  ml: 'Malayalam (മലയാളം)',
+  pa: 'Punjabi (ਪੰਜਾਬੀ)',
+  mixed: 'Hinglish / Code-Mixed',
+  unknown: 'Unspecified',
+};
+
 function highlightText(text: string, query: string) {
   if (!query || !query.trim()) return text;
   const terms = query.trim().split(/\s+/).filter(Boolean);
@@ -45,6 +74,7 @@ export default function Comments() {
   const [sentiment, setSentiment] = useState<string>(searchParams.get('sentiment') || '');
   const [stakeholder, setStakeholder] = useState<string>(searchParams.get('stakeholder') || '');
   const [issue, setIssue] = useState<string>(searchParams.get('issue') || '');
+  const [language, setLanguage] = useState<string>(searchParams.get('language') || '');
   const [section, setSection] = useState<string>(searchParams.get('section') || '');
   const [page, setPage] = useState<number>(Number(searchParams.get('page')) || 1);
 
@@ -86,6 +116,7 @@ export default function Comments() {
     if (sentiment) queryParams.sentiment = sentiment;
     if (stakeholder) queryParams.stakeholder = stakeholder;
     if (issue) queryParams.issue = issue;
+    if (language) queryParams.language = language;
     if (section.trim()) queryParams.section = section.trim();
 
     getComments(queryParams)
@@ -108,7 +139,7 @@ export default function Comments() {
       return;
     }
     fetchCommentsData();
-  }, [selectedConsultationId, page, search, version, sentiment, stakeholder, issue, section, contextLoading]);
+  }, [selectedConsultationId, page, search, version, sentiment, stakeholder, issue, language, section, contextLoading]);
 
   // Handle ESC key to close drawer
   useEffect(() => {
@@ -132,12 +163,13 @@ export default function Comments() {
     setSentiment('');
     setStakeholder('');
     setIssue('');
+    setLanguage('');
     setSection('');
     setPage(1);
     setSearchParams({});
   };
 
-  const hasActiveFilters = Boolean(search || version || sentiment || stakeholder || issue || section);
+  const hasActiveFilters = Boolean(search || version || sentiment || stakeholder || issue || language || section);
 
   if (contextLoading) return <LoadingState message={loadingText} />;
   if (error) return <ErrorState message={error} onRetry={fetchCommentsData} />;
@@ -197,7 +229,7 @@ export default function Comments() {
           </button>
         </form>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2 text-xs">
           <select
             value={version}
             onChange={(e) => { setVersion(e.target.value); setPage(1); }}
@@ -231,6 +263,19 @@ export default function Comments() {
             {issuesList.map((i) => (
               <option key={i.issue} value={i.issue}>
                 {i.issue}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={language}
+            onChange={(e) => { setLanguage(e.target.value); setPage(1); }}
+            className="bg-slate-50 border border-slate-200 rounded px-2 py-1 text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400 text-xs font-medium"
+          >
+            <option value="">All Languages</option>
+            {LANG_OPTIONS.map((l) => (
+              <option key={l.code} value={l.code}>
+                {l.name}
               </option>
             ))}
           </select>
@@ -309,9 +354,16 @@ export default function Comments() {
                         {c.id}
                       </td>
                       <td className="py-2.5 px-3">
-                        <p className="text-slate-800 line-clamp-2 leading-relaxed font-serif">
-                          "{highlightText(c.text, search)}"
-                        </p>
+                        <div className="flex items-start gap-1.5">
+                          {c.detected_language && (
+                            <span className="shrink-0 text-[10px] uppercase font-mono px-1 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200 font-semibold mt-0.5">
+                              {c.detected_language}
+                            </span>
+                          )}
+                          <p className="text-slate-800 line-clamp-2 leading-relaxed font-serif">
+                            "{highlightText(c.text, search)}"
+                          </p>
+                        </div>
                       </td>
                       <td className="py-2.5 px-3 text-center whitespace-nowrap">
                         <span className={`text-[11px] px-2 py-0.5 rounded font-medium ${sentimentColor(c.sentiment)}`}>
@@ -379,7 +431,7 @@ export default function Comments() {
         )}
       </div>
 
-      {/* Slide-over Drawer for Comment Inspection (P0.1) */}
+      {/* Slide-over Drawer for Comment Inspection */}
       {selectedComment && (
         <>
           {/* Backdrop */}
@@ -439,6 +491,18 @@ export default function Comments() {
                 </blockquote>
               </div>
 
+              {/* Salient Clause / Argument Evidence */}
+              {selectedComment.argument_evidence && (
+                <div className="bg-amber-50/70 border border-amber-200/80 rounded p-3 space-y-1">
+                  <span className="text-[10px] font-semibold uppercase text-amber-900 tracking-wider block">
+                    Extracted Argument Evidence
+                  </span>
+                  <p className="text-xs text-amber-950 font-serif italic leading-relaxed">
+                    "{selectedComment.argument_evidence}"
+                  </p>
+                </div>
+              )}
+
               {/* Consultation Context & Analysis Attributes */}
               <div className="space-y-4">
                 <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider border-b border-slate-100 pb-1.5">
@@ -446,6 +510,13 @@ export default function Comments() {
                 </h3>
 
                 <div className="space-y-2 text-xs">
+                  <div className="flex justify-between py-1 border-b border-slate-100 items-center">
+                    <span className="text-slate-500">Detected Language</span>
+                    <span className="font-medium text-slate-900 px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 font-mono text-[11px]">
+                      {LANG_NAMES[selectedComment.detected_language || 'en'] || selectedComment.detected_language || 'English'}
+                    </span>
+                  </div>
+
                   <div className="flex justify-between py-1 border-b border-slate-100">
                     <span className="text-slate-500">Classified Sentiment</span>
                     <span className="font-semibold text-slate-900">{selectedComment.sentiment || 'Neutral'}</span>
@@ -464,6 +535,15 @@ export default function Comments() {
                       {selectedComment.issue || 'General Feedback'}
                     </span>
                   </div>
+
+                  {selectedComment.aspect && (
+                    <div className="flex justify-between py-1 border-b border-slate-100 items-baseline">
+                      <span className="text-slate-500">Policy Aspect Focus</span>
+                      <span className="font-medium text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded text-[11px]">
+                        {selectedComment.aspect}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="flex justify-between py-1 border-b border-slate-100">
                     <span className="text-slate-500">Policy Draft Version</span>

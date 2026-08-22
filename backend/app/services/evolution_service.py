@@ -8,8 +8,20 @@ from app.models.comment import Comment, CommentAnalysis
 from app.models.consultation import DraftVersion
 
 
+"""Policy Evolution & Multi-Version Trajectory Tracking Service.
+
+Architectural Decisions & Rationale:
+- Multi-Draft Comparison (v1.0 -> v2.0 -> v3.0): Evaluates whether draft revisions resolved
+  stakeholder objections across consultation lifecycle.
+- Deterministic Classification:
+  - IMPROVED: Negative complaints dropped by >= evolution_improved_drop_pct (default 40%).
+  - EMERGING: Issues with rapid growth (>= evolution_emerging_min_growth_pct, default 100%) or newly introduced in later versions.
+  - WORSENED: Issues with substantial complaint growth (>= evolution_worsened_min_growth_pct, default 50%).
+  - PERSISTENT: Issues remaining active without resolution (|growth| <= evolution_persistent_max_change_pct, default 25%).
+"""
+
 def classify_lifecycle(v1_count: int, v2_count: int, v3_count: int) -> str:
-    """Deterministic lifecycle classification from version counts."""
+    """Deterministic lifecycle classification from version counts using configured thresholds."""
     counts = [v1_count, v2_count, v3_count]
     total = sum(counts)
     if total == 0:
@@ -32,9 +44,9 @@ def classify_lifecycle(v1_count: int, v2_count: int, v3_count: int) -> str:
             return "WORSENED"
         if abs(growth_v1_v3) <= settings.evolution_persistent_max_change_pct and total >= 30:
             return "PERSISTENT"
-        if drop_pct > 20:
+        if drop_pct >= (settings.evolution_improved_drop_pct / 2.0):
             return "IMPROVED"
-        if growth_v1_v2 > 50 or growth_v1_v3 > 50:
+        if growth_v1_v2 >= settings.evolution_worsened_min_growth_pct or growth_v1_v3 >= settings.evolution_worsened_min_growth_pct:
             return "EMERGING" if v1 < 50 else "WORSENED"
 
     return "PERSISTENT"

@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session, joinedload
 
+from app.config import settings
 from app.database.connection import get_db
 from app.models.comment import Comment, CommentAnalysis
 from app.models.consultation import Consultation, DraftVersion
@@ -11,10 +12,14 @@ from app.schemas import (
     ConsultationListItem,
     ConsultationOut,
     DashboardResponse,
+    DuplicateGroupOut,
     EvidenceResponse,
     HealthResponse,
     IssueDetailOut,
     IssueOut,
+    LanguageStatOut,
+    SimilarCommentOut,
+    SystemInfoOut,
     UploadResponse,
     VersionOut,
 )
@@ -38,8 +43,36 @@ def root():
 
 
 @router.get("/health", response_model=HealthResponse)
-def health():
-    return {"status": "ok"}
+def health(db: Session = Depends(get_db)):
+    """
+    Comprehensive health probe for load balancers and system monitoring.
+    Verifies database connectivity and local PyTorch model readiness.
+    """
+    from sqlalchemy import text
+    from app.services.sentiment_service import is_model_loaded as is_sentiment_model_loaded
+    from app.services.embedding_service import is_embedding_model_loaded
+
+    db_status = "connected"
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Health check database probe failed: {e}")
+        db_status = "error"
+
+    sent_loaded = is_sentiment_model_loaded()
+    emb_loaded = is_embedding_model_loaded()
+
+    return HealthResponse(
+        status="healthy" if db_status == "connected" else "degraded",
+        database=db_status,
+        sentiment_model_loaded=sent_loaded,
+        embedding_model_loaded=emb_loaded,
+        sentiment_model=settings.sentiment_model,
+        embedding_model=settings.embedding_model,
+        inference_mode="Local Analysis Mode (PyTorch / Transformers)" if settings.use_ml_model else "Deployed Static Mode",
+        ready=db_status == "connected",
+    )
 
 
 @router.get("/consultations", response_model=list[ConsultationListItem])
@@ -125,6 +158,7 @@ def list_comments(
     section: str | None = None,
     stakeholder: str | None = None,
     issue: str | None = None,
+    language: str | None = None,
     search: str | None = None,
     db: Session = Depends(get_db),
 ):
@@ -144,6 +178,8 @@ def list_comments(
         q = q.filter(Comment.stakeholder_type == stakeholder)
     if issue:
         q = q.filter(CommentAnalysis.issue == issue)
+    if language:
+        q = q.filter(CommentAnalysis.detected_language == language)
     if search:
         q = q.filter(or_(Comment.text.ilike(f"%{search}%"), CommentAnalysis.issue.ilike(f"%{search}%")))
 
@@ -158,6 +194,127 @@ def list_comments(
     )
 
 
+
+@router.get("/comments/duplicates", response_model=list[DuplicateGroupOut])
+def get_duplicate_comments(
+    consultation_id: int = Query(...),
+    threshold: float = Query(default=None),
+    limit: int = Query(default=20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    """
+    Detect exact and near-duplicate comments efficiently without naive O(n^2).
+    1. Exact duplicate check via text grouping.
+    2. Near-duplicate candidates via sentence embeddings above duplicate_threshold.
+    """
+    from app.services.embedding_service import deserialize_embedding, cosine_similarity
+    from app.config import settings
+
+    actual_threshold = threshold if threshold is not None else settings.duplicate_threshold
+
+    all_comments = (
+        db.query(Comment)
+        .options(joinedload(Comment.analysis), joinedload(Comment.version))
+        .filter(Comment.consultation_id == consultation_id)
+        .order_by(Comment.id.asc())
+        .all()
+    )
+
+    if not all_comments:
+        return []
+
+    groups: list[DuplicateGroupOut] = []
+    group_counter = 1
+    handled_comment_ids = set()
+
+    # Step 1: Exact Duplicates via normalized text mapping
+    exact_text_map: dict[str, list[Comment]] = {}
+    for c in all_comments:
+        norm_txt = c.text.strip().lower()
+        exact_text_map.setdefault(norm_txt, []).append(c)
+
+    for norm_txt, c_list in exact_text_map.items():
+        if len(c_list) > 1:
+            for c in c_list:
+                handled_comment_ids.add(c.id)
+
+            comments_out = [
+                SimilarCommentOut(
+                    comment_id=c.id,
+                    similarity_score=1.0,
+                    text=c.text,
+                    version=c.version.version_number if c.version else None,
+                    sentiment=c.analysis.sentiment if c.analysis else None,
+                    issue=c.analysis.issue if c.analysis else None,
+                    detected_language=c.analysis.detected_language if c.analysis else None,
+                    stakeholder_type=c.stakeholder_type,
+                )
+                for c in c_list
+            ]
+            groups.append(DuplicateGroupOut(
+                group_id=group_counter,
+                duplicate_type="exact",
+                similarity_score=1.0,
+                representative_text=c_list[0].text,
+                comment_count=len(c_list),
+                comments=comments_out,
+            ))
+            group_counter += 1
+            if len(groups) >= limit:
+                return groups
+
+    # Step 2: Near-duplicate candidates among remaining comments using embeddings
+    remaining = [c for c in all_comments if c.id not in handled_comment_ids and c.analysis and c.analysis.embedding]
+    if len(remaining) > 1 and len(groups) < limit:
+        vectors = [(c, deserialize_embedding(c.analysis.embedding)) for c in remaining]
+        vectors = [v for v in vectors if v[1] is not None]
+
+        used_in_near = set()
+        for i in range(len(vectors)):
+            c_i, vec_i = vectors[i]
+            if c_i.id in used_in_near:
+                continue
+
+            near_matches = [c_i]
+            for j in range(i + 1, min(len(vectors), i + 50)):  # Windowed candidate comparison for scalability
+                c_j, vec_j = vectors[j]
+                if c_j.id in used_in_near:
+                    continue
+                sim = cosine_similarity(vec_i, vec_j)
+                if sim >= actual_threshold:
+                    near_matches.append(c_j)
+                    used_in_near.add(c_j.id)
+
+            if len(near_matches) > 1:
+                used_in_near.add(c_i.id)
+                comments_out = [
+                    SimilarCommentOut(
+                        comment_id=c.id,
+                        similarity_score=round(cosine_similarity(vec_i, deserialize_embedding(c.analysis.embedding) or vec_i), 4),
+                        text=c.text,
+                        version=c.version.version_number if c.version else None,
+                        sentiment=c.analysis.sentiment if c.analysis else None,
+                        issue=c.analysis.issue if c.analysis else None,
+                        detected_language=c.analysis.detected_language if c.analysis else None,
+                        stakeholder_type=c.stakeholder_type,
+                    )
+                    for c in near_matches
+                ]
+                groups.append(DuplicateGroupOut(
+                    group_id=group_counter,
+                    duplicate_type="near",
+                    similarity_score=actual_threshold,
+                    representative_text=c_i.text,
+                    comment_count=len(near_matches),
+                    comments=comments_out,
+                ))
+                group_counter += 1
+                if len(groups) >= limit:
+                    break
+
+    return groups
+
+
 @router.get("/comments/{comment_id}", response_model=CommentOut)
 def get_comment(comment_id: int, db: Session = Depends(get_db)):
     c = (
@@ -169,6 +326,7 @@ def get_comment(comment_id: int, db: Session = Depends(get_db)):
     if not c:
         raise HTTPException(status_code=404, detail="Comment not found")
     return _comment_to_out(c)
+
 
 
 @router.get("/issues/{consultation_id}", response_model=list[IssueOut])
@@ -378,6 +536,12 @@ async def upload_comments(
     if not file.filename or not file.filename.lower().endswith(".csv"):
         raise HTTPException(status_code=400, detail="Please upload a valid CSV file.")
 
+    if not settings.use_ml_model:
+        raise HTTPException(
+            status_code=503,
+            detail="Live multilingual model analysis is available in Local Analysis Mode. The deployed demo operates on pre-analyzed consultation datasets stored in Supabase."
+        )
+
     content = await file.read()
     parsed = parse_csv(content)
     
@@ -434,7 +598,6 @@ async def upload_comments(
         result = process_and_store_comments(db, consultation.id, version_map, parsed["rows"])
     except Exception as e:
         logger.error(f"Error processing comments for consultation {consultation.id}: {str(e)}")
-        # Note: If it fails catastrophically despite our try-except block, we return 500
         raise HTTPException(
             status_code=500, 
             detail="A catastrophic error occurred while analyzing the comments. Please try again."
@@ -451,7 +614,7 @@ async def upload_comments(
         message=f"Successfully analyzed {total_processed} comments.",
         rows_total=parsed["rows_total"],
         rows_stored=total_processed,
-        rows_invalid=total_failed, # legacy backwards compat
+        rows_invalid=total_failed,
         rows_processed=total_processed,
         rows_filtered=total_filtered,
         rows_failed=total_failed,
@@ -460,6 +623,159 @@ async def upload_comments(
         sentiments=result["sentiments"],
         issues_detected=result["issues_detected"],
         consultation_id=consultation.id,
+    )
+
+
+@router.get("/comments/{comment_id}/similar", response_model=list[SimilarCommentOut])
+def get_similar_comments(
+    comment_id: int,
+    threshold: float = Query(default=None),
+    limit: int = Query(default=10, ge=1, le=50),
+    db: Session = Depends(get_db),
+):
+    """Retrieve semantically similar comments using multilingual sentence embeddings."""
+    from app.services.embedding_service import deserialize_embedding, find_similar, generate_embedding
+    from app.config import settings
+
+    actual_threshold = threshold if threshold is not None else settings.similarity_threshold
+
+    target_comment = (
+        db.query(Comment)
+        .options(joinedload(Comment.analysis))
+        .filter(Comment.id == comment_id)
+        .first()
+    )
+    if not target_comment:
+        raise HTTPException(status_code=404, detail="Comment not found")
+
+    target_analysis = target_comment.analysis
+    target_embedding = deserialize_embedding(target_analysis.embedding) if target_analysis else None
+    if not target_embedding and target_comment.text:
+        target_embedding = generate_embedding(target_comment.text)
+
+    if not target_embedding:
+        return []
+
+    # Fetch candidate comments from same consultation
+    candidates_db = (
+        db.query(Comment)
+        .options(joinedload(Comment.analysis), joinedload(Comment.version))
+        .join(CommentAnalysis, CommentAnalysis.comment_id == Comment.id)
+        .filter(
+            Comment.consultation_id == target_comment.consultation_id,
+            Comment.id != comment_id,
+            CommentAnalysis.embedding.isnot(None),
+        )
+        .all()
+    )
+
+    candidate_vectors = []
+    comment_map = {}
+    for c in candidates_db:
+        emb = deserialize_embedding(c.analysis.embedding)
+        if emb:
+            candidate_vectors.append((c.id, emb))
+            comment_map[c.id] = c
+
+    matches = find_similar(target_embedding, candidate_vectors, threshold=actual_threshold, top_k=limit)
+
+    results = []
+    for cid, score in matches:
+        c = comment_map.get(cid)
+        if c:
+            a = c.analysis
+            results.append(SimilarCommentOut(
+                comment_id=c.id,
+                similarity_score=score,
+                text=c.text,
+                version=c.version.version_number if c.version else None,
+                sentiment=a.sentiment if a else None,
+                issue=a.issue if a else None,
+                detected_language=a.detected_language if a else None,
+                stakeholder_type=c.stakeholder_type,
+            ))
+
+    return results
+
+
+@router.get("/dashboard/{consultation_id}/languages", response_model=list[LanguageStatOut])
+def get_language_statistics(consultation_id: int, db: Session = Depends(get_db)):
+    """Retrieve language breakdown and sentiment by language from real database records."""
+    LANG_NAMES = {
+        "en": "English",
+        "hi": "Hindi (हिन्दी)",
+        "mr": "Marathi (मराठी)",
+        "gu": "Gujarati (ગુજરાતી)",
+        "bn": "Bengali (বাংলা)",
+        "ta": "Tamil (தமிழ்)",
+        "te": "Telugu (తెలుగు)",
+        "kn": "Kannada (ಕನ್ನಡ)",
+        "ml": "Malayalam (മലയാളം)",
+        "pa": "Punjabi (ਪੰਜਾਬੀ)",
+        "mixed": "Hinglish / Code-Mixed",
+        "unknown": "Unspecified",
+    }
+
+    rows = (
+        db.query(
+            CommentAnalysis.detected_language,
+            CommentAnalysis.sentiment,
+            func.count(Comment.id)
+        )
+        .join(Comment, Comment.id == CommentAnalysis.comment_id)
+        .filter(Comment.consultation_id == consultation_id)
+        .group_by(CommentAnalysis.detected_language, CommentAnalysis.sentiment)
+        .all()
+    )
+
+    total_comments = sum(r[2] for r in rows) or 1
+    lang_map: dict[str, dict[str, Any]] = {}
+
+    for lang_code, sentiment, count in rows:
+        code = lang_code or "unknown"
+        if code not in lang_map:
+            lang_map[code] = {"count": 0, "pos": 0, "neg": 0, "neu": 0}
+        lang_map[code]["count"] += count
+        if sentiment == "Positive":
+            lang_map[code]["pos"] += count
+        elif sentiment == "Negative":
+            lang_map[code]["neg"] += count
+        else:
+            lang_map[code]["neu"] += count
+
+    results = []
+    for code, data in sorted(lang_map.items(), key=lambda x: -x[1]["count"]):
+        cnt = data["count"]
+        results.append(LanguageStatOut(
+            language=LANG_NAMES.get(code, code.capitalize()),
+            code=code,
+            count=cnt,
+            percentage=round((cnt / total_comments) * 100, 1),
+            positive_pct=round((data["pos"] / cnt) * 100, 1) if cnt else 0,
+            negative_pct=round((data["neg"] / cnt) * 100, 1) if cnt else 0,
+            neutral_pct=round((data["neu"] / cnt) * 100, 1) if cnt else 0,
+        ))
+
+    return results
+
+
+@router.get("/system/info", response_model=SystemInfoOut)
+def get_system_info():
+    """Judge-facing model metadata and configuration."""
+    from app.config import settings
+    return SystemInfoOut(
+        sentiment_model=settings.sentiment_model,
+        embedding_model=settings.embedding_model,
+        language_detection="langdetect (Statistical n-gram + Hinglish heuristics)",
+        inference_mode="Local Analysis Mode (PyTorch / Transformers)" if settings.use_ml_model else "Deployed Demo Mode (Database)",
+        languages_tested=[
+            "English", "Hindi (हिन्दी)", "Marathi (मराठी)", "Gujarati (ગુજરાતી)",
+            "Bengali (বাংলা)", "Tamil (தமிழ்)", "Telugu (తెలుగు)", "Kannada (ಕನ್ನಡ)",
+            "Malayalam (മലയാളം)", "Punjabi (ਪੰਜਾਬੀ)", "Hinglish (Code-Mixed)"
+        ],
+        similarity_threshold=settings.similarity_threshold,
+        duplicate_threshold=settings.duplicate_threshold,
+        issue_similarity_threshold=settings.issue_similarity_threshold,
     )
 
 
@@ -477,4 +793,10 @@ def _comment_to_out(c: Comment) -> CommentOut:
         model_name=a.model_name if a else None,
         issue=a.issue if a else None,
         issue_confidence=a.issue_confidence if a else None,
+        detected_language=a.detected_language if a else None,
+        language_confidence=a.language_confidence if a else None,
+        aspect=a.aspect if a else None,
+        aspect_confidence=a.aspect_confidence if a else None,
+        argument_evidence=a.argument_evidence if a else None,
     )
+

@@ -68,6 +68,13 @@ export default function UploadPage() {
 
     try {
       const res = await uploadComments(file, undefined, replace, title.trim() || undefined);
+      
+      if (!res.success) {
+        const err: any = new Error(res.message);
+        err.friendlyMessage = res.message;
+        throw err;
+      }
+      
       setResult(res);
       await refreshConsultations();
       if (res.consultation_id) {

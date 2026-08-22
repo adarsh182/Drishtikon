@@ -6,6 +6,13 @@ from pydantic import BaseModel
 
 class HealthResponse(BaseModel):
     status: str
+    database: str = "connected"
+    sentiment_model_loaded: bool = False
+    embedding_model_loaded: bool = False
+    sentiment_model: str = ""
+    embedding_model: str = ""
+    inference_mode: str = "Local Analysis Mode (PyTorch / Transformers)"
+    ready: bool = True
 
 
 class VersionOut(BaseModel):
@@ -52,6 +59,53 @@ class CommentOut(BaseModel):
     model_name: str | None = None
     issue: str | None = None
     issue_confidence: float | None = None
+    detected_language: str | None = None
+    language_confidence: float | None = None
+    aspect: str | None = None
+    aspect_confidence: float | None = None
+    argument_evidence: str | None = None
+
+
+class SimilarCommentOut(BaseModel):
+    comment_id: int
+    similarity_score: float
+    text: str
+    version: str | None = None
+    sentiment: str | None = None
+    issue: str | None = None
+    detected_language: str | None = None
+    stakeholder_type: str | None = None
+
+
+class DuplicateGroupOut(BaseModel):
+    group_id: int
+    duplicate_type: str  # "exact" or "near"
+    similarity_score: float
+    representative_text: str
+    comment_count: int
+    comments: list[SimilarCommentOut]
+
+
+class LanguageStatOut(BaseModel):
+    language: str
+    code: str
+    count: int
+    percentage: float
+    positive_pct: float
+    negative_pct: float
+    neutral_pct: float
+
+
+class SystemInfoOut(BaseModel):
+    sentiment_model: str
+    embedding_model: str
+    language_detection: str
+    inference_mode: str
+    languages_tested: list[str]
+    similarity_threshold: float
+    duplicate_threshold: float
+    issue_similarity_threshold: float
+
 
 
 class CommentListResponse(BaseModel):

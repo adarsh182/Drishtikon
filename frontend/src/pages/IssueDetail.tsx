@@ -240,18 +240,36 @@ export default function IssueDetail() {
           ) : (
             <div className="divide-y divide-slate-100">
               {evidence.items.map((comment) => (
-                <div key={comment.id} className="py-3 first:pt-0 last:pb-0">
+                <div key={comment.id} className="py-3.5 first:pt-0 last:pb-0">
                   <p className="text-xs text-slate-800 leading-relaxed font-serif">
                     "{comment.text}"
                   </p>
 
-                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px]">
-                    <span className={`px-1.5 py-0.2 rounded font-medium ${sentimentColor(comment.sentiment)}`}>
+                  {comment.argument_evidence && comment.argument_evidence !== comment.text && (
+                    <p className="text-[11px] text-slate-500 italic mt-1 pl-2 border-l border-slate-200">
+                      Key clause: "{comment.argument_evidence}"
+                    </p>
+                  )}
+
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[11px]">
+                    <span className={`px-1.5 py-0.5 rounded font-medium ${sentimentColor(comment.sentiment)}`}>
                       {comment.sentiment}
                     </span>
 
+                    {comment.detected_language && (
+                      <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono text-[10px] uppercase border border-slate-200">
+                        {comment.detected_language}
+                      </span>
+                    )}
+
+                    {comment.aspect && (
+                      <span className="px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-medium border border-indigo-100">
+                        {comment.aspect}
+                      </span>
+                    )}
+
                     {comment.version && (
-                      <span className="px-1.5 py-0.2 rounded bg-slate-100 text-slate-700 font-mono">
+                      <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 font-mono">
                         {comment.version}
                       </span>
                     )}

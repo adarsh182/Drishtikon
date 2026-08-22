@@ -1,228 +1,183 @@
-# Drishtikon
-### MCA Policy Consultation Intelligence Platform
+# Drishtikon (दृष्टिकोण)
+### National Policy Consultation Analytics Platform · Ministry of Corporate Affairs
 
-## 1. Overview
+> **Portable local setup for compatible Windows/macOS/Linux systems.**  
+> 100% offline, self-contained AI analytics platform with zero external cloud APIs or proprietary token requirements.
 
-Ministries receive large volumes of unstructured consultation comments and need a faster, traceable way to understand sentiment, concerns, affected stakeholders, and whether later drafts address those concerns.
+---
 
-**Drishtikon** is an intelligent analytics platform that automates this entire lifecycle. The core workflow involves:
+## 1. Quick Start (One Command)
 
-Public consultation CSV → comment validation → sentiment analysis → policy issue identification → stakeholder analysis → section mapping → evidence retrieval → policy evolution across drafts.
+### macOS / Linux:
+```bash
+# 1. Clone or extract project repository
+git clone https://github.com/adarsh182/Drishtikon.git
+cd Drishtikon
 
-This project was built for the **Smart India Hackathon** (Problem Statement ID: SIH25034, Ministry of Corporate Affairs).
+# 2. Run automated setup (creates virtualenv, installs deps, checks/caches models, seeds SQLite DB)
+./setup.sh
 
-## 2. Key Differentiator
+# 3. Start local application stack (Backend on :8000, Frontend on :5173)
+./start.sh
+```
 
-### Policy Evolution
-The platform's primary strength is its ability to track "What changed after public feedback?". 
-It provides a chronological view of issues across multiple consultation phases:
-Draft v1 → Stakeholder feedback → Draft v2 → Stakeholder feedback → Draft v3
+### Windows (cmd / PowerShell):
+```cmd
+# 1. Run automated setup
+setup.bat
 
-The system identifies:
-- **Improved concerns**: Issues that received negative feedback initially but improved in sentiment in subsequent drafts.
-- **Persistent concerns**: Issues that continue to draw negative feedback across multiple drafts.
-- **Emerging concerns**: New issues that arise in later drafts that were absent previously.
-- **Worsening concerns**: Issues where negative feedback increases over time.
-- **Volatile/recovery trajectories**: Issues showing varied responses over the consultation lifecycle.
+# 2. Start local application stack
+start.bat
+```
 
-Every analytical claim is strictly backed by verbatim evidence traceability.
+Once started:
+- **Web Application UI**: [http://localhost:5173](http://localhost:5173)
+- **FastAPI Interactive Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
+- **Health Check Probe**: [http://localhost:8000/health](http://localhost:8000/health)
 
-## 3. Features
-- **CSV Upload**: Robust ingestion of consultation data.
-- **Flexible CSV Column Detection**: Automatically maps standard and non-standard column headers (e.g. `true_clause`).
-- **Invalid/Empty Row Filtering**: Silently drops malformed data without failing the entire batch.
-- **Sentiment Analysis**: Predicts positive, negative, or neutral sentiment with confidence scores.
-- **Policy Issue Classification**: Tags comments to specific policy domains using keyword taxonomies.
-- **Stakeholder & Section Filtering**: Drill down analytics by stakeholder type or legal clause.
-- **Policy Evolution Tracking**: Tracks changes in sentiment and volume over distinct policy versions.
-- **Verbatim Evidence**: Direct drill-down from aggregated issues to the original comments.
-- **Comment Search & Dataset Isolation**: Search capabilities within fully isolated consultation datasets.
-- **Issue Priority Scoring**: Mathematically scores issues from 0-100 to prioritize analyst attention.
-- **Evidence Sufficiency Indicators**: Flags sample sizes as INSUFFICIENT, LIMITED, or SUFFICIENT.
-- **Responsive Dashboard**: Data visualization using React and Recharts.
+---
 
-## 4. Technology Stack
-| Layer       | Technologies |
-|-------------|--------------|
-| **Frontend** | React, TypeScript, Vite, Tailwind CSS, React Router, Recharts, Axios |
-| **Backend**  | Python, FastAPI, SQLAlchemy, Pydantic |
-| **NLP**      | Hugging Face Transformers (`cardiffnlp/twitter-roberta-base-sentiment-latest`), Keyword/Rule Fallback |
-| **Database** | PostgreSQL / Supabase (Production), SQLite (Local Development) |
-| **Deployment**| Vercel (Frontend), Render (Backend), Supabase (Database) |
+## 2. System Prerequisites & Hardware Profile
 
-## 5. Architecture
+| Requirement | Specification |
+| :--- | :--- |
+| **Operating System** | macOS 12+, Ubuntu 20.04+, Debian 11+, Windows 10/11 |
+| **Python Runtime** | Python 3.10, 3.11, 3.12, or 3.13 |
+| **Node Runtime** | Node.js v18.0+ and npm v9.0+ |
+| **System RAM** | 4 GB minimum (8 GB recommended for CPU inference) |
+| **Disk Space** | ~2.5 GB total (codebase + dependencies + local PyTorch model weights) |
+| **Network** | Internet required *only on first run* for Hugging Face model caching; 100% offline thereafter |
+
+---
+
+## 3. Local-First AI Architecture
+
+Drishtikon runs **entirely on device** using local PyTorch / Hugging Face transformer models:
 
 ```mermaid
-graph TD
-    User([User]) --> |HTTPS| ReactFrontend[React Frontend]
-    ReactFrontend --> |REST API| FastAPI[FastAPI Backend]
-    
-    subgraph Analysis Pipeline
-        FastAPI --> CSVParser[CSV Parser]
-        CSVParser --> SentimentService[Sentiment Service]
-        SentimentService --> IssueDetection[Issue Detection]
-        IssueDetection --> EvolutionService[Evolution Service]
-        EvolutionService --> PriorityScoring[Priority Scoring]
+flowchart TD
+    subgraph LocalSystem["Self-Contained Local Application (Offline / Zero External APIs)"]
+        CSV[User Consultation CSV] --> Parser[CSV Ingestion & Validation Engine]
+        Parser --> LangDet["1. Local Language Detection (langdetect + Hinglish Heuristics)"]
+        LangDet --> SentModel["2. Multilingual Sentiment (cardiffnlp/twitter-xlm-roberta-base)"]
+        SentModel --> EmbModel["3. Sentence Embeddings (sentence-transformers MiniLM-L12-v2)"]
+        EmbModel --> IssueClf["4. Semantic Issue & Aspect Classifier"]
+        EmbModel --> Dups["5. Two-Tier Near-Duplicate Campaign Clusterer"]
+        IssueClf --> Evid["6. Verbatim Argument Evidence Extractor"]
+        SentModel & IssueClf & Evid --> DB[("Local SQLite Database (policylens.db)")]
+        DB --> Traj["7. Policy Evolution & Multi-Version Trajectory Matrix"]
+        Traj --> Frontend["React + Vite Interactive Policy Dashboard (http://localhost:5173)"]
     end
-    
-    PriorityScoring --> SQLAlchemy[SQLAlchemy ORM]
-    SQLAlchemy --> DB[(PostgreSQL / Supabase)]
 ```
 
-## 6. Repository Structure
+### Local AI Models & Roles:
+1. **Multilingual Sentiment Transformer** (`cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual`):
+   - 278-million parameter cross-lingual sequence classifier.
+   - Evaluated across **11 Indian languages** (Hindi, Marathi, Gujarati, Bengali, Tamil, Telugu, Kannada, Malayalam, Punjabi, English) and Hinglish.
+   - Steady-state CPU latency: **~15–25 ms per comment**.
+2. **Multilingual Sentence Embeddings** (`sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`):
+   - Dense 384-dimensional normalized vector representations for cross-lingual semantic matching.
+3. **Language Detection & Code-Mixing**:
+   - `langdetect` n-gram analyzer combined with heuristic regex indicators for Hinglish / Romanized Hindi (`mixed` / `unknown` support).
+4. **Policy Aspect & Issue Taxonomy Intelligence**:
+   - Cosine similarity matching against policy anchor embeddings (threshold $\ge 0.45$).
+5. **Verbatim Argument Evidence Extractor**:
+   - Preserves original sentences and salient clauses for complete analytical traceability.
+
+---
+
+## 4. Manual / Step-by-Step Setup
+
+If you prefer starting backend and frontend separately:
+
+### Backend Setup (FastAPI + PyTorch + SQLite):
+```bash
+cd backend
+
+# Create & activate virtual environment
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Initialize database, download/cache models, and seed demo dataset
+python scripts/setup_local.py
+
+# Launch FastAPI development server
+uvicorn app.main:app --port 8000
+```
+
+### Frontend Setup (React + Vite + Tailwind):
+```bash
+cd frontend
+
+# Install Node modules
+npm install
+
+# Start Vite dev server
+npm run dev
+```
+
+---
+
+## 5. Benchmarking & Verification Suite
+
+Drishtikon includes dedicated offline test suites for automated verification:
+
+```bash
+cd backend
+source venv/bin/activate
+
+# 1. Run Complete Automated Test Suite (20 tests: Config, Health, 4xx handling, Embeddings)
+pytest tests/test_phase1_safe_cleanup.py -v
+
+# 2. Run Multilingual 11-Language Live Inference Benchmark
+python scripts/test_multilingual_model.py
+
+# 3. Run Cross-Lingual Semantic Similarity & Vector Benchmark
+python scripts/test_embeddings.py
+```
+
+---
+
+## 6. Project Structure
+
 ```
 Drishtikon/
+├── setup.sh                 # One-command setup for macOS & Linux
+├── start.sh                 # One-command application launcher (macOS & Linux)
+├── setup.bat                # Windows setup script
+├── start.bat                # Windows startup script
 ├── backend/
 │   ├── app/
-│   │   ├── api/          # FastAPI routes
-│   │   ├── database/     # DB connections
-│   │   ├── models/       # SQLAlchemy models
-│   │   ├── schemas/      # Pydantic validation schemas
-│   │   ├── services/     # Core business logic & NLP
-│   │   └── utils/        # Parsers and helpers
-│   ├── scripts/          # Demo seed scripts
-│   ├── static/           # Static assets (demo CSV)
-│   ├── requirements.txt
-│   └── Dockerfile
+│   │   ├── api/             # FastAPI REST endpoints & error handling
+│   │   ├── config.py        # Centralized typed thresholds & validation
+│   │   ├── database/        # SQLite connection & idempotent migrations
+│   │   ├── models/          # SQLAlchemy consultation & comment models
+│   │   ├── schemas/         # Pydantic serialization schemas
+│   │   └── services/        # Local AI pipelines (sentiment, embeddings, aspects)
+│   ├── scripts/
+│   │   ├── setup_local.py   # Automated pre-flight initialization & cache checker
+│   │   ├── seed_demo.py     # Multilingual synthetic dataset generator
+│   │   ├── test_multilingual_model.py # 11-language benchmark
+│   │   └── test_embeddings.py         # Cross-lingual embedding benchmark
+│   ├── tests/
+│   │   └── test_phase1_safe_cleanup.py# Comprehensive pytest suite
+│   └── requirements.txt     # Python dependencies
 ├── frontend/
-│   ├── public/           # Sample CSVs & icons
 │   ├── src/
-│   │   ├── components/   # Reusable UI elements
-│   │   ├── context/      # React contexts
-│   │   ├── pages/        # Route views
-│   │   ├── services/     # API clients
-│   │   ├── types/        # TypeScript definitions
-│   │   └── utils/        # Formatting utilities
-│   └── package.json
-├── .env.example
-├── .gitignore
+│   │   ├── pages/           # Dashboard, Evolution, Issues, Comments, Upload
+│   │   ├── services/api.ts  # Axios client with retry logic
+│   │   └── types/           # TypeScript data interfaces
+│   └── package.json         # React & Vite dependencies
 └── README.md
 ```
 
-## 7. Local Development
+---
 
-### Backend
-Navigate to the `backend/` directory, set up your virtual environment, and run the FastAPI server:
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload
-```
-- API will run at: `http://localhost:8000`
-- Interactive Swagger docs: `http://localhost:8000/docs`
+## 7. Model Cache Management & Privacy
 
-### Frontend
-Navigate to the `frontend/` directory, install dependencies, and run the Vite dev server:
-```bash
-cd frontend
-npm install
-npm run dev
-```
-- App will run at: `http://localhost:5173`
-
-## 8. Environment Variables
-To run this project, configure the following variables in a `.env` file (see `.env.example`). Do NOT commit real secrets.
-
-**Backend (`backend/.env`)**
-- `DATABASE_URL`: Connection string to PostgreSQL/SQLite
-- `CORS_ORIGINS`: Allowed frontend origins
-- `USE_ML_MODEL`: Set to `true` to enable Hugging Face Transformers
-- `HF_TOKEN`: (Optional) Hugging Face Hub token to avoid rate limits
-
-**Frontend (`frontend/.env`)**
-- `VITE_API_URL`: Backend URL
-- `VITE_API_TIMEOUT_MS`: Standard request timeout
-- `VITE_UPLOAD_TIMEOUT_MS`: Extended timeout for CSV ingestion
-
-## 9. CSV Upload Format
-The ingestion pipeline is flexible and supports mapping aliases. Unknown columns are ignored. Malformed rows (missing text) are skipped without failing the entire batch.
-
-**Required Fields (or aliases):**
-- `text` / `comment` / `feedback`: The actual stakeholder comment.
-- `stakeholder_type` / `stakeholder`: e.g. "Law Firm", "Citizen".
-- `version` / `draft_version`: e.g. "v1", "v2" (normalized automatically).
-
-**Optional Fields:**
-- `true_clause` / `section` / `clause`: Specific legal section referenced.
-- `language`: e.g. "english", "hinglish".
-- `is_templated`: Boolean flag for bulk/spam comments.
-
-**Example CSV:**
-```csv
-text,stakeholder_type,version,true_clause
-"The penalty for late filing is too high.",Startup,v1,Section 14
-"We agree with the new CSR reporting norms.",Law Firm,v2,Section 135
-```
-
-## 10. Analysis Pipeline
-The backend executes a sequential analysis pipeline on ingestion:
-1. **CSV Ingestion**: Receives the multipart file.
-2. **Schema Detection**: Matches headers against known aliases.
-3. **Row Validation**: Discards empty or fundamentally invalid rows.
-4. **Normalization**: Standardizes versions (e.g. "Draft 1" -> "v1").
-5. **Sentiment**: Analyzes text via Transformers (or keyword fallback) to yield polarity and confidence.
-6. **Issue Tagging**: Applies taxonomy-based keywords to detect the primary issue (or tags "General Feedback").
-7. **Database Persistence**: Stores all artifacts cleanly into relational tables.
-
-Individual row failures will not crash the batch ingestion.
-
-## 11. Priority Scoring
-Issues are assigned a `Priority Score (0-100)` to highlight the most critical policy concerns for analysts. The mathematically robust formula weights:
-- **30% Concern Magnitude**: Issue volume relative to the consultation total.
-- **30% Negative Sentiment**: Density of negative feedback.
-- **20% Stakeholder Breadth**: Diversity of unique stakeholder groups involved.
-- **20% Policy Evolution**: Negative momentum across versions.
-
-Categories:
-- **HIGH**: >= 65
-- **MEDIUM**: 40-64
-- **LOW**: < 40
-
-**Evidence Sufficiency**
-To prevent small sample sizes from artificially inflating priority, issues are flagged with data sufficiency indicators:
-- `< 10 comments`: INSUFFICIENT
-- `10-29 comments`: LIMITED
-- `>= 30 comments`: SUFFICIENT
-
-## 12. Policy Evolution
-Drishtikon analyzes issue trajectories over consecutive drafts (e.g. `v1 -> v2 -> v3`).
-The system calculates absolute changes in volume and average sentiment. 
-Note: The system identifies variations in stakeholder reception to specific policy issues over time, but it does *not* read amendment text to determine exactly *why* a policy changed. It relies purely on the quantitative shift in public feedback.
-
-## 13. API
-Key endpoints available on the FastAPI backend:
-- `GET /health` : System health check
-- `GET /consultations` : List all loaded consultations
-- `POST /comments/upload` : Multipart form upload for CSV files
-- `GET /dashboard/{consultation_id}` : Aggregated metrics for the dashboard
-- `GET /issues/{consultation_id}` : List of priority-scored policy issues
-- `GET /issues/{consultation_id}/{issue_name}` : Detailed issue metrics
-- `GET /issues/{consultation_id}/{issue_name}/evidence` : Paginated verifiable original comments
-- `GET /consultations/{consultation_id}/versions` : Version history breakdown
-
-## 14. Demo Workflow
-For a quick 2-minute evaluation:
-1. Open the **Dashboard** to view sentiment distributions.
-2. Locate the top policy concern tagged as **HIGH Priority**.
-3. Click to open **Evidence** and verify the original stakeholder verbatim comments.
-4. Open the **Policy Evolution** tab to see how a specific issue changed from `v1` to `v2`.
-5. Navigate to **Upload**, drag and drop a new consultation CSV, and observe the real-time dataset analysis update.
-
-## 15. Deployment
-- **Frontend**: Deployed seamlessly on Vercel.
-- **Backend**: Hosted on Render. Note: Free tier instances may spin down after inactivity, causing a brief "cold start" (up to 50 seconds) on the first upload request.
-- **Database**: Fully managed PostgreSQL on Supabase.
-
-## 16. Limitations
-- **Sentiment Domain Limitations**: Indian-language and code-mixed (Hinglish) sentiment performance is currently a known limitation of the English-centric baseline model.
-- **Issue Detection**: Currently relies on taxonomy/keyword matching rather than semantic embeddings.
-- **Cold Starts**: Render free-tier deployments can experience cold starts.
-- **Advisory Prototype**: This platform acts as an analytics co-pilot for policy analysts; it is not a legal decision-making system.
-
-## 17. Future Improvements
-- Integration of specialized Indian-language and code-mixed models (e.g. IndicRoBERTa).
-- Semantic/embedding-based issue detection and clause mapping.
-- Automated deduplication for identical templated campaigns.
-- Exportable executive briefings and automated human-in-the-loop review queues.
+- **Cache Directory**: Models are automatically cached in your operating system's user directory (`~/.cache/huggingface/hub` on Unix, `%USERPROFILE%\.cache\huggingface\hub` on Windows).
+- **Offline Guarantee**: Once downloaded during `./setup.sh`, the application operates **100% offline** without any internet connection.
+- **Git Cleanliness**: Model binary weights and SQLite database files are excluded from version control via `.gitignore`.

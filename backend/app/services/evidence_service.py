@@ -35,5 +35,11 @@ def get_issue_evidence(
             "section": c.section,
             "stakeholder_type": c.stakeholder_type,
             "issue": a.issue if a else None,
+            "detected_language": a.detected_language if a else None,
+            "language_confidence": a.language_confidence if a else None,
+            "aspect": a.aspect if a else None,
+            "aspect_confidence": a.aspect_confidence if a else None,
+            "argument_evidence": a.argument_evidence if a else None,
+            "model_name": a.model_name if a else None,
         })
     return {"total": total, "items": items, "issue": issue_name}

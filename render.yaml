@@ -11,4 +11,8 @@ services:
       - key: CORS_ORIGINS
         value: "*"
       - key: SENTIMENT_MODEL
-        value: cardiffnlp/twitter-roberta-base-sentiment-latest
+        value: cardiffnlp/twitter-xlm-roberta-base-sentiment-multilingual
+      - key: USE_ML_MODEL
+        value: "false"
+      - key: DATABASE_URL
+        sync: false

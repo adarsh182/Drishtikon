@@ -16,12 +16,12 @@ import {
 } from 'recharts';
 import { Link } from 'react-router-dom';
 import { useConsultation } from '../context/ConsultationContext';
-import { getDashboard } from '../services/api';
-import type { DashboardData } from '../types';
+import { getDashboard, getLanguageStats } from '../services/api';
+import type { DashboardData, LanguageStat } from '../types';
 import LoadingState from '../components/LoadingState';
 import ErrorState from '../components/ErrorState';
 import { priorityColor } from '../utils/format';
-import { ArrowRight, AlertTriangle, GitCompare, MessageSquare } from 'lucide-react';
+import { ArrowRight, AlertTriangle, GitCompare, MessageSquare, Globe } from 'lucide-react';
 
 const COLORS = {
   Positive: '#059669', // subtle emerald
@@ -32,6 +32,7 @@ const COLORS = {
 export default function Dashboard() {
   const { selectedConsultationId, loading: contextLoading } = useConsultation();
   const [data, setData] = useState<DashboardData | null>(null);
+  const [languageStats, setLanguageStats] = useState<LanguageStat[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [loadingText, setLoadingText] = useState<string>('Connecting to PolicyLens analysis server...');
@@ -46,10 +47,14 @@ export default function Dashboard() {
       setLoadingText('The analysis server is starting. This may take a few moments.');
     }, 2500);
 
-    getDashboard(selectedConsultationId)
-      .then((dash) => {
+    Promise.all([
+      getDashboard(selectedConsultationId),
+      getLanguageStats(selectedConsultationId).catch(() => []),
+    ])
+      .then(([dash, langs]) => {
         clearTimeout(slowLoadTimer);
         setData(dash);
+        setLanguageStats(langs);
         setLoading(false);
       })
       .catch((err) => {
@@ -58,6 +63,7 @@ export default function Dashboard() {
         setLoading(false);
       });
   };
+
 
   useEffect(() => {
     if (!selectedConsultationId) {
@@ -104,10 +110,11 @@ export default function Dashboard() {
             {data.consultation.description || 'Stakeholder feedback summary and policy review analysis'}
           </p>
         </div>
-        <div className="text-xs text-slate-500">
-          Status: <span className="font-medium text-slate-700 capitalize">{data.consultation.status}</span>
+        <div className="text-xs text-slate-500 flex items-center gap-2">
+          <span>Status: <span className="font-medium text-slate-700 capitalize">{data.consultation.status}</span></span>
         </div>
       </div>
+
 
       {/* Compact KPI Row */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -334,8 +341,49 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Row 3: Stakeholder Dissent & Quick Consultation Actions */}
+      {/* Row 4: Multilingual Submissions & Stakeholder Dissent */}
       <div className="grid lg:grid-cols-2 gap-5">
+        {/* Multilingual Breakdown from Real DB */}
+        <div className="bg-white border border-slate-200 rounded p-4 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+              <div className="flex items-center gap-1.5">
+                <Globe size={14} className="text-blue-600" />
+                <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
+                  Multilingual Submissions ({languageStats.length} Languages)
+                </h3>
+              </div>
+              <span className="text-[11px] text-slate-400">Calculated from Database Records</span>
+            </div>
+
+            {languageStats.length === 0 ? (
+              <p className="text-xs text-slate-400 py-8 text-center italic">No multilingual data available for this consultation.</p>
+            ) : (
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {languageStats.map((l) => (
+                  <div key={l.code} className="border border-slate-100 rounded p-2 text-xs hover:bg-slate-50 transition-colors">
+                    <div className="flex items-center justify-between font-medium">
+                      <span className="text-slate-800">{l.language}</span>
+                      <span className="text-slate-500 font-mono text-[11px]">{l.count} comments ({l.percentage}%)</span>
+                    </div>
+                    {/* Visual Bar of Sentiment */}
+                    <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden flex mt-1.5">
+                      <div style={{ width: `${l.positive_pct}%` }} className="bg-emerald-600 h-full" title={`Positive: ${l.positive_pct}%`} />
+                      <div style={{ width: `${l.neutral_pct}%` }} className="bg-slate-400 h-full" title={`Neutral: ${l.neutral_pct}%`} />
+                      <div style={{ width: `${l.negative_pct}%` }} className="bg-rose-600 h-full" title={`Negative: ${l.negative_pct}%`} />
+                    </div>
+                    <div className="flex justify-between text-[10px] text-slate-500 mt-1">
+                      <span className="text-emerald-700">+{l.positive_pct}% Pos</span>
+                      <span className="text-slate-600">{l.neutral_pct}% Neu</span>
+                      <span className="text-rose-700">-{l.negative_pct}% Neg</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Negative Sentiment by Stakeholder Group */}
         <div className="bg-white border border-slate-200 rounded p-4">
           <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
@@ -344,7 +392,7 @@ export default function Dashboard() {
             </h3>
             <span className="text-[11px] text-slate-400">Highest Opposition Segments</span>
           </div>
-          <div className="h-64 sm:h-52 w-full">
+          <div className="h-64 sm:h-56 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={data.stakeholders.slice(0, 6)} margin={{ top: 10, right: 10, left: -20, bottom: 25 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -356,79 +404,86 @@ export default function Dashboard() {
             </ResponsiveContainer>
           </div>
         </div>
+      </div>
 
-        {/* Quick Consultation Actions & Scope */}
-        <div className="bg-white border border-slate-200 rounded p-4 flex flex-col justify-between">
-          <div>
-            <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
-              <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
-                Deliberation & Review Tools
-              </h3>
-              <span className="text-[11px] text-slate-400 font-mono">Dataset #{data.consultation.id}</span>
+      {/* Row 5: Deliberation & Review Tools (3 Column Full-Width Action Center) */}
+      <div className="bg-white border border-slate-200 rounded p-4">
+        <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+          <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wider">
+            Deliberation & Policy Analysis Tools
+          </h3>
+          <span className="text-[11px] text-slate-400 font-mono">Dataset #{data.consultation.id}</span>
+        </div>
+
+        <div className="grid sm:grid-cols-3 gap-3">
+          <Link
+            to="/evolution"
+            className="flex flex-col justify-between p-3.5 rounded border border-slate-200 hover:border-blue-300 hover:bg-blue-50/40 transition-all group"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded bg-blue-50 text-blue-700 flex items-center justify-center flex-shrink-0 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                <GitCompare size={16} />
+              </div>
+              <div>
+                <span className="text-xs font-semibold text-slate-900 group-hover:text-blue-700 block">
+                  Policy Evolution Matrix
+                </span>
+                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  Track whether draft revisions resolved stakeholder objections across versions
+                </p>
+              </div>
             </div>
-
-            <div className="space-y-2.5">
-              <Link
-                to="/evolution"
-                className="flex items-center justify-between p-2.5 rounded border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors group"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded bg-blue-50 text-blue-700 flex items-center justify-center flex-shrink-0">
-                    <GitCompare size={15} />
-                  </div>
-                  <div>
-                    <span className="text-xs font-semibold text-slate-900 group-hover:text-blue-700">
-                      Policy Evolution Matrix
-                    </span>
-                    <p className="text-[11px] text-slate-500">
-                      Track whether draft revisions resolved stakeholder objections across versions
-                    </p>
-                  </div>
-                </div>
-                <ArrowRight size={13} className="text-slate-400 group-hover:text-slate-700" />
-              </Link>
-
-              <Link
-                to="/issues"
-                className="flex items-center justify-between p-2.5 rounded border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors group"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded bg-rose-50 text-rose-700 flex items-center justify-center flex-shrink-0">
-                    <AlertTriangle size={15} />
-                  </div>
-                  <div>
-                    <span className="text-xs font-semibold text-slate-900 group-hover:text-blue-700">
-                      Issues & Evidence Master-Detail
-                    </span>
-                    <p className="text-[11px] text-slate-500">
-                      Inspect verbatim submissions categorised by topic, priority, and section
-                    </p>
-                  </div>
-                </div>
-                <ArrowRight size={13} className="text-slate-400 group-hover:text-slate-700" />
-              </Link>
-
-              <Link
-                to="/comments"
-                className="flex items-center justify-between p-2.5 rounded border border-slate-200 hover:border-slate-300 hover:bg-slate-50 transition-colors group"
-              >
-                <div className="flex items-center gap-2.5">
-                  <div className="w-7 h-7 rounded bg-slate-100 text-slate-700 flex items-center justify-center flex-shrink-0">
-                    <MessageSquare size={15} />
-                  </div>
-                  <div>
-                    <span className="text-xs font-semibold text-slate-900 group-hover:text-blue-700">
-                      Search & Filter Raw Submissions
-                    </span>
-                    <p className="text-[11px] text-slate-500">
-                      Full-text search with highlighting and slide-over comment inspection
-                    </p>
-                  </div>
-                </div>
-                <ArrowRight size={13} className="text-slate-400 group-hover:text-slate-700" />
-              </Link>
+            <div className="flex items-center justify-end gap-1 text-[11px] text-blue-600 font-medium mt-3">
+              <span>View Trajectory</span>
+              <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
             </div>
-          </div>
+          </Link>
+
+          <Link
+            to="/issues"
+            className="flex flex-col justify-between p-3.5 rounded border border-slate-200 hover:border-rose-300 hover:bg-rose-50/40 transition-all group"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded bg-rose-50 text-rose-700 flex items-center justify-center flex-shrink-0 group-hover:bg-rose-600 group-hover:text-white transition-colors">
+                <AlertTriangle size={16} />
+              </div>
+              <div>
+                <span className="text-xs font-semibold text-slate-900 group-hover:text-rose-700 block">
+                  Issues & Evidence Master-Detail
+                </span>
+                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  Inspect verbatim submissions categorised by topic, priority score, and section
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-1 text-[11px] text-rose-600 font-medium mt-3">
+              <span>Inspect Evidence</span>
+              <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
+            </div>
+          </Link>
+
+          <Link
+            to="/comments"
+            className="flex flex-col justify-between p-3.5 rounded border border-slate-200 hover:border-slate-400 hover:bg-slate-50 transition-all group"
+          >
+            <div className="flex items-start gap-3">
+              <div className="w-8 h-8 rounded bg-slate-100 text-slate-700 flex items-center justify-center flex-shrink-0 group-hover:bg-slate-800 group-hover:text-white transition-colors">
+                <MessageSquare size={16} />
+              </div>
+              <div>
+                <span className="text-xs font-semibold text-slate-900 group-hover:text-slate-800 block">
+                  Search & Filter Submissions
+                </span>
+                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  Full-text search with highlighting, language filters, and comment slide-over
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-1 text-[11px] text-slate-700 font-medium mt-3">
+              <span>Browse Comments</span>
+              <ArrowRight size={12} className="group-hover:translate-x-0.5 transition-transform" />
+            </div>
+          </Link>
         </div>
       </div>
     </div>

@@ -4,8 +4,12 @@ import type {
   ComparisonData,
   Consultation,
   DashboardData,
+  DuplicateGroup,
   Issue,
   IssueDetail,
+  LanguageStat,
+  SimilarComment,
+  SystemInfo,
   UploadResult,
   Version,
 } from '../types';
@@ -120,8 +124,33 @@ export async function uploadComments(file: File, consultationId?: number, replac
   return data;
 }
 
+export async function getSimilarComments(commentId: number, threshold?: number): Promise<SimilarComment[]> {
+  const params: Record<string, any> = {};
+  if (threshold !== undefined) params.threshold = threshold;
+  const { data } = await api.get(`/comments/${commentId}/similar`, { params });
+  return data;
+}
+
+export async function getDuplicates(consultationId: number, threshold?: number): Promise<DuplicateGroup[]> {
+  const params: Record<string, any> = { consultation_id: consultationId };
+  if (threshold !== undefined) params.threshold = threshold;
+  const { data } = await api.get('/comments/duplicates', { params });
+  return data;
+}
+
+export async function getLanguageStats(consultationId: number): Promise<LanguageStat[]> {
+  const { data } = await api.get(`/dashboard/${consultationId}/languages`);
+  return data;
+}
+
+export async function getSystemInfo(): Promise<SystemInfo> {
+  const { data } = await api.get('/system/info');
+  return data;
+}
+
 export function getDemoDownloadUrl() {
   return `${API_URL}/demo/download`;
 }
 
 export default api;
+

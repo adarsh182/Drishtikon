@@ -36,4 +36,14 @@ class CommentAnalysis(Base):
     issue_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
+    # Multilingual & Semantic additions
+    detected_language: Mapped[str | None] = mapped_column(String(20), index=True, nullable=True)
+    language_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    embedding: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON-serialized 384-dim vector
+    aspect: Mapped[str | None] = mapped_column(String(100), index=True, nullable=True)
+    aspect_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    argument_evidence: Mapped[str | None] = mapped_column(Text, nullable=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
     comment: Mapped["Comment"] = relationship(back_populates="analysis")
+
